@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aufmaß-Tool</title>
+    <link rel="stylesheet" href="style.css">
+
+    <!-- PWA: Installierbarkeit -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#0b66ff">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Aufmaß-Tool">
+    <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+
+    <!-- Google Identity Services (für die Google-Drive-Anbindung) -->
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body class="controls-hidden">
+    <div class="main-toolbar">
+        <div class="toolbar-row">
+            <h2>Aufmaß-Tool</h2>
+            <button id="main-toolbar-toggle-btn" class="toggle-button" title="Hauptleiste einklappen">🔼</button>
+            <div class="view-switch" role="group" aria-label="Ansicht wählen">
+                <button id="btn-view-desktop" type="button" class="view-btn active" title="Desktop-Ansicht" aria-pressed="true">🖥️ Desktop</button>
+                <button id="btn-view-ipad" type="button" class="view-btn" title="iPad mini 6 (Hochformat)" aria-pressed="false">📱 iPad</button>
+            </div>
+            <div class="logo-wrapper">
+                <label for="logo-upload-input">
+                    <img id="logo-preview" src="Logo Klein.png" alt="Firmenlogo">
+                    <span class="logo-hint">Logo ändern ✎</span>
+                </label>
+                <input type="file" id="logo-upload-input" accept="image/png, image/jpeg" style="display:none;">
+            </div>
+        </div>
+        
+        <div class="toolbar-row project-data-row">
+            <input type="text" id="projekt-bauvorhaben" placeholder="Bauvorhaben ✎" class="project-input" autocomplete="off">
+            <input type="text" id="projekt-name" placeholder="Name ✎" class="project-input" autocomplete="off">
+            <input type="text" id="projekt-anschrift" placeholder="Anschrift ✎" class="project-input" autocomplete="off">
+            <input type="text" id="projekt-telefon" placeholder="Telefon ✎" class="project-input" autocomplete="off">
+            <input type="email" id="projekt-email" placeholder="E-Mail ✎" class="project-input" autocomplete="off">
+        </div>
+
+        <div class="toolbar-row tabs">
+            <div class="tab active" id="tab-skizze">📐 Skizze</div>
+            <div class="tab" id="tab-blatt">📋 Aufmaßblatt</div>
+            <div class="tab" id="tab-material">📦 Material</div>
+            <div class="tab" id="tab-2d">🎨 2D Canvas</div>
+            <div class="tab" id="tab-notizen">📝 Notizen</div>
+        </div>
+    </div>
+
+    <img id="logo-for-pdf" src="Logo Klein.png" style="display:none;" alt="Logo für PDF">
+
+    <div class="fixed-controls-wrapper">
+        <div class="controls-container is-hidden">
+            <div class="controls-row">
+                <label>Modus:
+                    <select id="mode">
+                        <option value="distance">Distanz/Winkel</option>
+                        <option value="click">Per Mausklick</option>
+                    </select>
+                </label>
+                <div class="toolbar-divider"></div>
+                <label>Maßstab (px/m): <input type="number" id="scale" value="50" style="width: 60px;"></label>
+                <div class="scale-buttons">
+                    <button id="btn-scale-10">10</button>
+                    <button id="btn-scale-25">25</button>
+                    <button id="btn-scale-50">50</button>
+                    <button id="btn-scale-100">100</button>
+                </div>
+                <div class="toolbar-divider"></div>
+                <label>Grid (m): <input type="number" id="grid-size" value="0.5" step="0.5" style="width: 60px;"></label>
+            </div>
+            <div class="controls-row">
+                <button id="btn-undo">↩️ Rückgängig</button>
+                <button id="close-btn" disabled>🔁 Schließen</button>
+                <button id="btn-new-sketch">🆕 Neue Skizze</button>
+                <button id="btn-export-sketch-pdf">📄 Aktuelle Skizze als PDF</button>
+                <div class="toolbar-divider"></div>
+                <label><input type="checkbox" id="snap-enable" checked> Snapping:</label>
+                <label><input type="checkbox" id="snap-grid"> Grid-Snap:</label>
+            </div>
+        </div>
+        <div class="toggle-container">
+            <button id="toggle-controls-btn" class="toggle-button" title="Steuerung einblenden">🔽</button>
+        </div>
+    </div>
+
+    <div id="skizze" class="controls-hidden">
+        <div class="canvas-container">
+            <canvas id="canvas" width="1000" height="700"></canvas>
+        </div>
+    </div>
+
+    <div id="aufmassblatt">
+        <div class="no-print">
+            <h3>📋 Aufmaßblatt — gespeicherte Skizzen</h3>
+            <div>
+                <button id="btn-project-load">📂 Projekt laden (.json)</button>
+                <button id="btn-export-aufmass-pdf">📄 Aufmaßblatt (PDF) exportieren</button>
+                <button id="btn-clear-all-sketches" style="background-color: #dc3545; color: white;">🗑️ Alle Skizzen löschen</button>
+                <button id="btn-transfer-selected-to-2d" style="background-color: #17a2b8; color: white;">Auswahl an 2D senden</button>
+                <button id="btn-google-drive-connect" style="background-color: #fff; border: 1px solid #4285F4; color: #4285F4;">🔗 Mit Google verbinden</button>
+                <span id="google-drive-status" style="font-size: 0.85em; color: #28a745; margin-left: 6px; display: none;">✓ Mit Google Drive verbunden</span>
+            </div>
+        </div>
+        <div id="skizzen-list">
+            <p>Keine gespeicherten Skizzen.</p>
+        </div>
+    </div>
+    
+    <div id="materialbedarf">
+        <div class="material-filters">
+            <button id="mat-filter-all" class="active">Alle</button>
+            <button id="mat-filter-ziegel">Eindeckung</button>
+            <button id="mat-filter-dämmung">Dämmung</button>
+            <button id="mat-filter-metall">Metall</button>
+            <button id="mat-filter-sonstiges">Sonstiges</button>
+        </div>
+        <button id="btn-manage-materials" style="margin-left: 10px; background-color: #6c757d; color: white;">Materialien verwalten</button>
+        <div id="material-list-container">
+             <p>Noch keiner Skizze ein Material zugewiesen. Gehe ins Aufmaßblatt oder weise hier direkt pro Skizze ein Material zu.</p>
+        </div>
+    </div>
+
+    <div id="view-2d">
+        <div class="toggle-container">
+            <button id="toggle-controls-btn-2d" class="toggle-button" title="2D-Steuerung einklappen">🔼</button>
+        </div>
+
+        <!-- Seiten / Duplizieren -->
+        <div id="pages-bar-2d" class="controls-container" style="margin-bottom: 10px;">
+            <div class="controls-row" style="gap: 10px; align-items: center; flex-wrap: wrap;">
+                <label style="font-weight: 600;">Seite:</label>
+                <select id="page-select-2d" style="min-width: 160px;"></select>
+                <button id="page-add-2d" type="button">🆕 Neue Seite</button>
+                <button id="page-duplicate-2d" type="button">📄 Duplizieren</button>
+                <button id="page-rename-2d" type="button">✏️ Umbenennen</button>
+                <button id="page-delete-2d" type="button">🗑️ Löschen</button>
+
+                <div class="toolbar-divider"></div>
+
+                <label style="display:flex; align-items:center; gap:6px;">
+                    PV-Summen-Seite:
+                    <select id="pv-page-select" style="min-width: 180px;">
+                        <option value="active">Aktive 2D-Seite</option>
+                    </select>
+                </label>
+            </div>
+        </div>
+
+        <div id="buttons" class="controls-container">
+             <input type="file" id="load-input" accept=".json">
+             <button id="save-btn">Als JSON herunterladen</button>
+             <button id="add-pv-btn">PV Modul einfügen</button>
+             <button id="add-pv-repeat-btn" style="width: 30px; height: 30px; min-width: 30px; min-height: 30px; max-width: 30px; max-height: 30px; padding: 0; margin: 0; font-size: 18px; line-height: 1; display: inline-flex; align-items: center; justify-content: center; background-color: #e8f0fe; border: 1px solid #0b66ff; color: #0b66ff; border-radius: 50%;" title="Fügt ein weiteres Modul mit der Größe des zuletzt gewählten oder angeklickten PV-Moduls hinzu">+</button>
+             
+             <!-- Fenster-Button -->
+             <button id="add-window-btn" style="background-color: #17a2b8; color: white; border: none;">🪟 Fenster einfügen</button>
+             
+             <div class="toolbar-divider"></div>
+             <button id="snap-toggle-btn">Snap: AN</button>
+             <button id="label-toggle-btn">Beschriftung: AN</button>
+             <button id="grid-toggle-btn">Grid: AN</button>
+             <button id="measure-btn">📏 Messen</button>
+             <button id="snap-90-degree-btn" style="display: none;">90°</button>
+             <div class="toolbar-divider"></div>
+             <label>Maßstab:</label>
+             <button id="btn-scale-2d-25" class="scale-btn-2d">25</button>
+             <button id="btn-scale-2d-50" class="scale-btn-2d active">50</button>
+             <button id="btn-scale-2d-100" class="scale-btn-2d">100</button>
+             <div id="rotation-panel">
+                <label>X: <input type="number" id="pos-x"></label>
+                <label>Y: <input type="number" id="pos-y"></label>
+                <label>Rot (°): <input type="number" id="rotation-input"></label>
+                <button id="rot-m90" class="rot-btn">−90°</button>
+                <button id="rot-m5" class="rot-btn">−5°</button>
+                <button id="rot-m1" class="rot-btn">−1°</button>
+                <button id="rot-p1" class="rot-btn">+1°</button>
+                <button id="rot-p5" class="rot-btn">+5°</button>
+                <button id="rot-p90" class="rot-btn">+90°</button>
+                <div class="toolbar-divider"></div>
+                <button id="lock-btn">🔒 Lock</button>
+                <button id="front-btn">↑ Vorn</button>
+                <button id="back-btn">↓ Hinten</button>
+                <button id="delete-btn">🗑️ Löschen</button>
+            </div>
+            <div id="nudge-controls">
+                <label>Nudge (m): <input type="number" id="nudge-amount" value="0.1" step="0.1" style="width: 60px;"></label>
+                <button id="nudge-up">↑</button>
+                <button id="nudge-down">↓</button>
+                <button id="nudge-left">←</button>
+                <button id="nudge-right">→</button>
+            </div>
+        </div>
+        <div id="container"></div>
+        <div id="zoom-indicator">Zoom: 100 %</div>
+        <div id="label-rotation-panel">
+            <button id="label-rot-m15">−15°</button>
+            <button id="label-rot-p15">+15°</button>
+        </div>
+    </div>
+
+    <div id="notizen" style="display: none; background: #fff; padding: 12px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.06); width: 95%; max-width: 1200px; box-sizing: border-box; margin: 0 auto;">
+        
+        <div class="controls-container" style="flex-direction: row; justify-content: center; flex-wrap: wrap; margin-bottom: 10px; display: flex; gap: 10px; align-items: center;">
+            <button id="btn-note-draw" class="active" style="background-color: #0b66ff; color: white;">✏️ Stift (Pencil)</button>
+            <button id="btn-note-erase">🧽 Radierer</button>
+            <button id="btn-note-text">🔤 Textfeld tippen</button>
+            
+            <div class="toolbar-divider"></div>
+            
+            <input type="file" id="note-image-upload" accept="image/*" style="display: none;">
+            <button id="btn-note-image" onclick="document.getElementById('note-image-upload').click()">🖼️ Bild einfügen</button>
+            
+            <div class="toolbar-divider"></div>
+            
+            <button id="btn-note-clear" style="background-color: #dc3545; color: white;">🗑️ Alles löschen</button>
+        </div>
+
+        <div id="notizen-container" style="border: 1px solid #ccc; width: 100%; height: 800px; background-color: #fafbff; overflow: hidden; position: relative; border-radius: 6px;">
+            </div>
+        <p style="text-align: center; color: #888; font-size: 13px; margin-top: 8px;">Tipp: Mit dem Apple Pencil frei zeichnen. Doppelklick auf Textfelder zum Bearbeiten. Doppelklick auf Bilder zum Löschen.</p>
+    </div>
+    
+    <div id="dist-winkel-panel" class="floating-panel" style="display: none;">
+        <div class="dist-panel-header">
+            <h4 id="dist-winkel-title" class="dist-panel-title">
+                <span class="dist-panel-title-text">Distanz &amp; Winkel</span>
+            </h4>
+            <button id="toggle-hilfspunkt" type="button" class="toggle-button" title="Hilfspunkte ein-/ausklappen" aria-expanded="true" style="display: inline-flex; align-items: center; justify-content: center;"></button>
+        </div>
+        <div id="dist-winkel-inputs">
+            <div class="panel-input-row">
+                <label style="flex: 1;">Distanz (m):</label>
+                <button id="btn-open-calc" class="calc-btn" type="button" aria-label="Taschenrechner öffnen" title="Taschenrechner">
+  <svg class="calc-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+    <rect x="4.5" y="2.5" width="15" height="19" rx="2.5" fill="#0b66ff" stroke="#0b66ff" stroke-width="1.5" />
+    <rect x="7" y="5" width="10" height="4" rx="1" fill="#bfe0ff" />
+    <circle cx="9" cy="13" r="1.15" fill="#fff" />
+    <circle cx="12" cy="13" r="1.15" fill="#fff" />
+    <circle cx="15" cy="13" r="1.15" fill="#ffd23f" />
+    <circle cx="9" cy="16.5" r="1.15" fill="#fff" />
+    <circle cx="12" cy="16.5" r="1.15" fill="#fff" />
+    <circle cx="15" cy="16.5" r="1.15" fill="#ffd23f" />
+    <rect x="7.85" y="18.6" width="4.3" height="1.7" rx="0.85" fill="#2ec26a" />
+    <circle cx="15" cy="19.45" r="1.15" fill="#ff6b57" />
+  </svg>
+</button>
+                <input type="number" id="distance" value="0" step="0.1" style="width: 80px;">
+            </div>
+            
+            <div class="panel-input-row">
+                <label style="flex: 1;">Winkel (°):</label>
+                <span class="winkel-kompass"><span id="kompass-pfeil">↑</span></span>
+                <input type="number" id="angle" value="0" step="1" style="width: 80px;">
+            </div>
+
+            <div class="quick-angle-buttons">
+                <button id="btn-dir-right" title="Rechts (90°)">→</button>
+                <button id="btn-dir-down" title="Runter (180°)">↓</button>
+                <button id="btn-dir-left" title="Links (270°)">←</button>
+                <button id="btn-dir-up" title="Hoch (0°)">↑</button>
+            </div>
+
+            <button id="btn-add-point" class="primary-action-btn big-btn">➕ Punkt hinzufügen</button>
+
+
+            <div id="hilfspunkt-block">
+                <hr style="margin: 10px 0; border: none; border-top: 1px solid #eee;">
+
+                <div class="panel-input-row xy-row">
+                    <label style="flex: 1;">Waagerecht (m):</label>
+                    <div class="xy-dir" role="group" aria-label="Richtung waagerecht">
+                        <button type="button" id="xy-x-left" class="xy-dir-btn" title="Links">←</button>
+                        <button type="button" id="xy-x-right" class="xy-dir-btn active" title="Rechts">→</button>
+                    </div>
+                    <input type="number" id="offset-x-abs" value="0" min="0" step="0.01" style="width: 80px;">
+                </div>
+
+                <div class="panel-input-row xy-row">
+                    <label style="flex: 1;">Senkrecht (m):</label>
+                    <div class="xy-dir" role="group" aria-label="Richtung senkrecht">
+                        <button type="button" id="xy-y-up" class="xy-dir-btn" title="Hoch">↑</button>
+                        <button type="button" id="xy-y-down" class="xy-dir-btn active" title="Runter">↓</button>
+                    </div>
+                    <input type="number" id="offset-y-abs" value="0" min="0" step="0.01" style="width: 80px;">
+                </div>
+
+                <!-- hidden: kompatibel zur bestehenden Logik addPointByOffsetXY() -->
+                <input type="hidden" id="offset-x" value="0">
+                <input type="hidden" id="offset-y" value="0">
+
+                <button id="btn-add-point-xy" class="primary-action-btn" style="width: 100%; margin-top: 6px;">📐 Punkt einmessen (X/Y)</button>
+            </div>
+        </div>
+        
+        <div id="panel-actions-dist-winkel" style="display: none;">
+            <button id="btn-panel-close">Schließen</button>
+            <button id="btn-panel-undo">Rückgängig</button>
+        </div>
+        
+        <div id="panel-finished-actions" style="display: none;">
+             <button id="btn-finished-undo">↩️ Rückgängig</button>
+             <button id="btn-save-and-exit">💾 Speichern</button>
+             <button id="btn-save-and-continue" style="background-color: #28a745; color: white;">Weiter</button>
+        </div>
+    </div>
+
+    <div id="edit-panel" class="floating-panel" style="display: none;">
+        <h4 class="dist-panel-title">
+            <span class="dist-panel-title-text">Segment bearbeiten</span>
+        </h4>
+        <p>Segment <strong>#<span id="seg-id">?</span></strong></p>
+        
+        <div class="edit-row">
+            <label>Länge (m): <input type="number" id="edit-length" step="0.01"></label>
+            <button id="btn-lock-length" class="lock-btn" title="Länge sperren">🔓</button>
+        </div>
+
+        <div class="edit-row">
+            <label>Winkel (°): <input type="number" id="edit-angle" step="0.1"></label>
+            <button id="btn-lock-angle" class="lock-btn" title="Winkel sperren">🔓</button>
+        </div>
+        
+        <label style="margin-top:10px;">Beschriftung: <input type="text" id="edit-label" list="label-suggestions" autocomplete="off"></label>
+        <datalist id="label-suggestions"></datalist>
+        <div class="edit-actions-row">
+            <button id="btn-apply-edit">✔️ Anwenden</button>
+            <button id="btn-cancel-edit">❌ Abbrechen</button>
+            <button id="btn-delete-segment" class="danger-btn">🗑️ Linie löschen</button>
+        </div>
+    </div>
+
+    <div id="export-choice-modal" class="floating-panel" style="display: none; min-width: 300px;">
+        <h4>Als was exportieren?</h4>
+        
+        <div id="export-options" style="text-align: left; margin-bottom: 15px; background: #f8f9fa; padding: 12px; border-radius: 6px; border: 1px solid #dee2e6;">
+            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer;">
+                <input type="checkbox" id="export-opt-skizzen" checked style="width: 18px; height: 18px;"> 
+                <span>Aufmaß & Summen</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px; cursor: pointer;">
+                <input type="checkbox" id="export-opt-material" checked style="width: 18px; height: 18px;"> 
+                <span>Materialbedarf</span>
+            </label>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; flex: 1;">
+                    <input type="checkbox" id="export-opt-2d" checked style="width: 18px; height: 18px;"> 
+                    <span>2D-Planung / PV</span>
+                </label>
+                <button type="button" id="export-2d-pages-toggle" class="toggle-button" aria-expanded="false" title="Seiten ein-/ausklappen" style="width: 30px; height: 30px; min-width: 30px; min-height: 30px; max-width: 30px; max-height: 30px; font-size: 13px; margin: 0; padding: 0; display: inline-flex; align-items: center; justify-content: center;"></button>
+            </div>
+            <div id="export-2d-pages-list" style="margin: 0 0 10px 26px; display: none; flex-direction: column; gap: 4px;"></div>
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="export-opt-notizen" checked style="width: 18px; height: 18px;"> 
+                <span>Baustellen-Notizen</span>
+            </label>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 10px;">
+            <button id="export-angebot-btn" style="flex: 1; background-color: #0b66ff; color: white; border: none;">Angebot</button>
+            <button id="export-rechnung-btn" style="flex: 1; background-color: #28a745; color: white; border: none;">Rechnung</button>
+        </div>
+        <button id="export-cancel-btn" style="width: 100%;">Abbrechen</button>
+    </div>
+    
+    <!-- Modal für die 2D-Fensterauswahl mit allen Standardgrößen -->
+    <div id="window-2d-choice-modal" class="floating-panel" style="display: none; min-width: 420px; z-index: 2000;">
+        <h4 style="margin-top: 0; margin-bottom: 10px;">Velux Größe wählen</h4>
+        
+        <!-- CK (Breite 55cm) -->
+        <h5 style="margin: 5px 0 5px; font-size: 13px; color: #555; border-bottom: 1px solid #eee;">Breite 55 cm (CK)</h5>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px;">
+            <button class="velux-btn" data-name="CK02" data-w="0.55" data-h="0.78">CK02</button>
+            <button class="velux-btn" data-name="CK04" data-w="0.55" data-h="0.98">CK04</button>
+            <button class="velux-btn" data-name="CK06" data-w="0.55" data-h="1.18">CK06</button>
+        </div>
+
+        <!-- FK (Breite 66cm) -->
+        <h5 style="margin: 10px 0 5px; font-size: 13px; color: #555; border-bottom: 1px solid #eee;">Breite 66 cm (FK)</h5>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px;">
+            <button class="velux-btn" data-name="FK04" data-w="0.66" data-h="0.98">FK04</button>
+            <button class="velux-btn" data-name="FK06" data-w="0.66" data-h="1.18">FK06</button>
+            <button class="velux-btn" data-name="FK08" data-w="0.66" data-h="1.40">FK08</button>
+        </div>
+
+        <!-- MK (Breite 78cm) -->
+        <h5 style="margin: 10px 0 5px; font-size: 13px; color: #555; border-bottom: 1px solid #eee;">Breite 78 cm (MK)</h5>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px;">
+            <button class="velux-btn" data-name="MK04" data-w="0.78" data-h="0.98">MK04</button>
+            <button class="velux-btn" data-name="MK06" data-w="0.78" data-h="1.18">MK06</button>
+            <button class="velux-btn" data-name="MK08" data-w="0.78" data-h="1.40">MK08</button>
+            <button class="velux-btn" data-name="MK10" data-w="0.78" data-h="1.60">MK10</button>
+            <button class="velux-btn" data-name="MK12" data-w="0.78" data-h="1.80">MK12</button>
+        </div>
+
+        <!-- PK (Breite 94cm) -->
+        <h5 style="margin: 10px 0 5px; font-size: 13px; color: #555; border-bottom: 1px solid #eee;">Breite 94 cm (PK)</h5>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px;">
+            <button class="velux-btn" data-name="PK04" data-w="0.94" data-h="0.98">PK04</button>
+            <button class="velux-btn" data-name="PK06" data-w="0.94" data-h="1.18">PK06</button>
+            <button class="velux-btn" data-name="PK08" data-w="0.94" data-h="1.40">PK08</button>
+            <button class="velux-btn" data-name="PK10" data-w="0.94" data-h="1.60">PK10</button>
+        </div>
+
+        <!-- SK (Breite 114cm) -->
+        <h5 style="margin: 10px 0 5px; font-size: 13px; color: #555; border-bottom: 1px solid #eee;">Breite 114 cm (SK)</h5>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 10px;">
+            <button class="velux-btn" data-name="SK06" data-w="1.14" data-h="1.18">SK06</button>
+            <button class="velux-btn" data-name="SK08" data-w="1.14" data-h="1.40">SK08</button>
+            <button class="velux-btn" data-name="SK10" data-w="1.14" data-h="1.60">SK10</button>
+        </div>
+
+        <!-- UK (Breite 134cm) -->
+        <h5 style="margin: 10px 0 5px; font-size: 13px; color: #555; border-bottom: 1px solid #eee;">Breite 134 cm (UK)</h5>
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; margin-bottom: 15px;">
+            <button class="velux-btn" data-name="UK04" data-w="1.34" data-h="0.98">UK04</button>
+            <button class="velux-btn" data-name="UK08" data-w="1.34" data-h="1.40">UK08</button>
+            <button class="velux-btn" data-name="UK10" data-w="1.34" data-h="1.60">UK10</button>
+        </div>
+
+        <button id="close-window-2d-modal" style="width: 100%;">Abbrechen</button>
+    </div>
+
+    <!-- NEU ANGEPASST: Modal für die PV-Modul Auswahl -->
+    <div id="pv-choice-modal" class="floating-panel" style="display: none; min-width: 350px; z-index: 2000;">
+        <h4 style="margin-top: 0; margin-bottom: 15px;">PV-Modul Größe wählen</h4>
+        
+        <div style="display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 15px;">
+            <!-- Das 'data-name' Attribut bestimmt den Text auf dem gezeichneten Modul! -->
+            <button class="pv-btn" data-name="1,13 x 1,72m" data-w="1.13" data-h="1.72">Standard (400W) - 1,13m × 1,72m</button>
+            <button class="pv-btn" data-name="1,13 x 1,76m" data-w="1.13" data-h="1.76">Groß (430W+) - 1,13m × 1,76m</button>
+            <button class="pv-btn" data-name="1,13 x 1,95m" data-w="1.13" data-h="1.95">XL (500W+) - 1,13m × 1,95m</button>
+            <button class="pv-btn" data-name="1,13 x 2,27m" data-w="1.13" data-h="2.27">Gewerbe (600W+) - 1,13m × 2,27m</button>
+        </div>
+
+        <button id="close-pv-modal" style="width: 100%;">Abbrechen</button>
+    </div>
+
+    <div id="accessory-choice-modal" class="floating-panel" style="display: none;">
+        <h4>Zubehör für <span id="accessory-sketch-name" style="font-style: italic;"></span></h4>
+        <div id="accessory-item-buttons">
+            <button onclick="selectAccessoryItem('Kamin')">Kamin</button>
+            <button onclick="selectAccessoryItem('Lüfter')">Lüfter</button>
+            <button onclick="selectAccessoryItem('Wohnraumfenster')">Wohnraumfenster</button>
+            <button onclick="selectAccessoryItem('Stahlfenster')">Stahlfenster</button>
+            <button onclick="selectAccessoryItem('Antenne')">Antenne</button>
+            <button onclick="selectAccessoryItem('Sonstiges')">Sonstiges...</button>
+        </div>
+        <button onclick="cancelAccessoryChoice()">Abbrechen</button>
+    </div>
+
+    <div id="window-choice-modal" class="floating-panel" style="display: none;">
+        <h4>Fenstertyp auswählen</h4>
+        <div id="window-item-buttons">
+            <button onclick="selectWindowType('Velux GGU')">Velux GGU</button>
+            <button onclick="selectWindowType('Velux GPU')">Velux GPU</button>
+            <button onclick="selectWindowType('Velux GXU')">Velux GXU</button>
+            <button onclick="selectWindowType('Velux GVK')">Velux GVK</button>
+            <button onclick="selectWindowType('Velux GVT')">Velux GVT</button>
+            <button onclick="selectWindowType('Sonstiges')">Sonstiges...</button>
+        </div>
+        <button onclick="cancelWindowChoice()">Abbrechen</button>
+    </div>
+    
+    <div id="window-size-prefix-modal" class="floating-panel" style="display: none;">
+        <h4>Größe (1/2): Präfix</h4>
+        <div id="window-size-prefix-buttons">
+            <button onclick="selectWindowSizePrefix('CK')">CK</button>
+            <button onclick="selectWindowSizePrefix('FK')">FK</button>
+            <button onclick="selectWindowSizePrefix('MK')">MK</button>
+            <button onclick="selectWindowSizePrefix('PK')">PK</button>
+            <button onclick="selectWindowSizePrefix('SK')">SK</button>
+            <button onclick="selectWindowSizePrefix('UK')">UK</button>
+        </div>
+        <button onclick="cancelWindowSizePrefix()">Abbrechen</button>
+    </div>
+    
+    <div id="window-size-suffix-modal" class="floating-panel" style="display: none;">
+        <h4>Größe (2/2): Suffix</h4>
+        <div id="window-size-suffix-buttons">
+            <button onclick="selectWindowSizeSuffix('02')">02</button>
+            <button onclick="selectWindowSizeSuffix('04')">04</button>
+            <button onclick="selectWindowSizeSuffix('06')">06</button>
+            <button onclick="selectWindowSizeSuffix('08')">08</button>
+            <button onclick="selectWindowSizeSuffix('10')">10</button>
+        </div>
+        <button onclick="cancelWindowSizeSuffix()">Abbrechen</button>
+    </div>
+
+    <div id="tile-choice-modal" class="floating-panel" style="display: none;">
+        <h4>Eindeckung auswählen</h4>
+        <div id="tile-item-buttons"></div>
+        <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
+            <button id="btn-close-tile-choice">Schließen</button>
+        </div>
+    </div>
+
+    <div id="daemmung-choice-modal" class="floating-panel" style="display: none;">
+        <h4>Dämmung auswählen</h4>
+        <div id="daemmung-item-buttons"></div>
+        <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
+            <button id="btn-close-daemmung-choice">Schließen</button>
+        </div>
+    </div>
+
+    <div id="metall-choice-modal" class="floating-panel" style="display: none; max-width: 380px;">
+        <h4>Metall-Positionen auswählen</h4>
+        <div id="metall-item-checkboxes" style="text-align: left; max-height: 320px; overflow-y: auto;"></div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px;">
+            <button id="btn-cancel-metall-choice">Abbrechen</button>
+            <button id="btn-apply-metall-choice" style="background-color: #28a745; color: white;">Übernehmen</button>
+        </div>
+    </div>
+
+    <div id="eindeckung-layers-modal" class="floating-panel" style="display: none; max-width: 380px;">
+        <h4>Bitumen/EPDM – Lagen auswählen</h4>
+        <div id="eindeckung-layers-checkboxes" style="text-align: left; max-height: 320px; overflow-y: auto;"></div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px;">
+            <button id="btn-cancel-eindeckung-layers">Abbrechen</button>
+            <button id="btn-apply-eindeckung-layers" style="background-color: #28a745; color: white;">Übernehmen</button>
+        </div>
+    </div>
+
+    <div id="calculator-modal" class="floating-panel" style="display: none;">
+        <h4>Taschenrechner</h4>
+        <div id="calc-formula-display"></div>
+        <input type="text" id="calc-display" readonly>
+        <div class="calc-buttons">
+            <button id="calc-7">7</button> <button id="calc-8">8</button> <button id="calc-9">9</button> <button id="calc-divide">/</button>
+            <button id="calc-4">4</button> <button id="calc-5">5</button> <button id="calc-6">6</button> <button id="calc-multiply">*</button>
+            <button id="calc-1">1</button> <button id="calc-2">2</button> <button id="calc-3">3</button> <button id="calc-subtract">-</button>
+            <button id="calc-0">0</button> <button id="calc-dot">.</button> <button id="calc-clear">C</button> <button id="calc-add">+</button>
+            <button id="calc-equals" class="calc-equal">=</button>
+            <button id="calc-use" class="calc-use">Übernehmen</button>
+        </div>
+        <button id="calc-close" style="width: 100%; margin-top: 10px;">Schließen</button>
+    </div>
+
+    <input type="file" id="import-file" accept=".json" style="display:none;">
+    
+    <script src="https://unpkg.com/konva@9.2.0/konva.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script type="module" src="js/main.js"></script>
+
+    <div id="custom-modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); align-items: center; justify-content: center; z-index: 1000;">
+      <div id="custom-modal" style="background: white; padding: 25px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); width: 90%; max-width: 450px; text-align: left;">
+        <h3 id="custom-modal-title" style="margin-top: 0; font-size: 1.2em; margin-bottom: 15px;">Titel</h3>
+        <div id="custom-modal-body">
+          <p id="custom-modal-text" style="margin-top: 0; margin-bottom: 15px; font-size: 1em; color: #333;">Nachricht.</p>
+          <input type="text" id="custom-modal-input" style="display: none; width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; border: 1px solid #ccc; border-radius: 6px;">
+        </div>
+        <div id="custom-modal-footer" style="margin-top: 25px; display: flex; justify-content: flex-end; gap: 10px;">
+          <button id="custom-modal-cancel">Abbrechen</button>
+          <button id="custom-modal-ok" style="background-color: #0b66ff; color: white; border-color: #0b66ff;">OK</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Startabfrage: fragt beim Programmstart gezielt alle Projektfelder ab -->
+    <div id="project-start-modal-overlay" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.6); align-items: center; justify-content: center; z-index: 1000;">
+      <div id="project-start-modal" style="background: white; padding: 25px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); width: 90%; max-width: 460px; text-align: left;">
+        <h3 style="margin-top: 0; font-size: 1.2em; margin-bottom: 18px; text-align: center;">Projektdaten erfassen</h3>
+        <div style="display: flex; flex-direction: column; gap: 12px;">
+          <label style="font-size: 0.9em; font-weight: 600; color: #333;">
+            Bauvorhaben
+            <input type="text" id="start-bauvorhaben" autocomplete="off" style="display: block; width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; font-weight: normal; border: 1px solid #ccc; border-radius: 6px; margin-top: 4px;">
+          </label>
+          <label style="font-size: 0.9em; font-weight: 600; color: #333;">
+            Name
+            <input type="text" id="start-name" autocomplete="off" style="display: block; width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; font-weight: normal; border: 1px solid #ccc; border-radius: 6px; margin-top: 4px;">
+          </label>
+          <label style="font-size: 0.9em; font-weight: 600; color: #333;">
+            Anschrift
+            <input type="text" id="start-anschrift" autocomplete="off" style="display: block; width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; font-weight: normal; border: 1px solid #ccc; border-radius: 6px; margin-top: 4px;">
+          </label>
+          <label style="font-size: 0.9em; font-weight: 600; color: #333;">
+            Telefon
+            <input type="text" id="start-telefon" autocomplete="off" style="display: block; width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; font-weight: normal; border: 1px solid #ccc; border-radius: 6px; margin-top: 4px;">
+          </label>
+          <label style="font-size: 0.9em; font-weight: 600; color: #333;">
+            E-Mail
+            <input type="email" id="start-email" autocomplete="off" style="display: block; width: 100%; box-sizing: border-box; padding: 10px; font-size: 16px; font-weight: normal; border: 1px solid #ccc; border-radius: 6px; margin-top: 4px;">
+          </label>
+        </div>
+        <div style="margin-top: 22px; display: flex; justify-content: flex-end; gap: 10px;">
+          <button id="project-start-skip" type="button">Später</button>
+          <button id="project-start-ok" type="button" style="background-color: #0b66ff; color: white; border-color: #0b66ff;">Übernehmen</button>
+        </div>
+      </div>
+    </div>
+    
+    <div id="material-management-modal" class="floating-panel" style="width: 90%; max-width: 800px; display: none;">
+        <h4>Materialdatenbank verwalten</h4>
+        <div id="material-management-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; border-radius: 6px; margin-bottom: 15px;">
+            </div>
+        <div style="display: flex; justify-content: space-between;">
+            <div style="display: flex; gap: 8px;">
+                <button id="btn-add-new-material">Neues Material hinzufügen</button>
+                <button id="btn-browse-material-db" style="background-color: #e8f0fe; border: 1px solid #0b66ff; color: #0b66ff;">📚 Aus Herstellerdatenbank wählen</button>
+            </div>
+            <button id="btn-close-material-management">Schließen</button>
+        </div>
+    </div>
+
+    <div id="material-browse-modal" class="floating-panel" style="width: 90%; max-width: 600px; display: none;">
+        <h4>Aus Herstellerdatenbank wählen</h4>
+        <input type="text" id="material-browse-search" placeholder="Suchen (z.B. Jacobi, BRAAS, Röben, Creaton)..." style="width: 100%; box-sizing: border-box; padding: 8px; margin-bottom: 12px; border: 1px solid #ccc; border-radius: 6px;">
+        <div id="material-browse-list" style="max-height: 400px; overflow-y: auto; border: 1px solid #ccc; padding: 10px; border-radius: 6px; margin-bottom: 15px;">
+        </div>
+        <div style="display: flex; justify-content: flex-end;">
+            <button id="btn-close-material-browse">Schließen</button>
+        </div>
+    </div>
+
+    <div id="material-edit-modal" class="floating-panel" style="width: 90%; max-width: 600px; display: none;">
+        <h4 id="material-edit-title">Material bearbeiten</h4>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <label>Kategorie: <input type="text" id="material-edit-category" list="category-suggestions"></label>
+            <datalist id="category-suggestions"></datalist>
+            <label>Art der Eindeckung (nur bei Kategorie "Eindeckung"):
+                <select id="material-edit-eindeckungsart">
+                    <option value="">– keine Angabe –</option>
+                    <option value="Ziegel/Pfanne">Ziegel/Pfanne</option>
+                    <option value="Bitumen/EPDM">Bitumen/EPDM</option>
+                    <option value="Zink/Alu">Zink/Alu</option>
+                </select>
+            </label>
+            <label>Materialname: <input type="text" id="material-edit-material" list="material-name-suggestions" autocomplete="off"></label>
+            <datalist id="material-name-suggestions"></datalist>
+            <small id="material-suggestion-hint" style="grid-column: 1 / -1; display: none; color: #28a745; margin-top: -8px;">✓ Technische Daten aus Herstellerangaben übernommen – bitte vor Verwendung mit dem aktuellen Datenblatt abgleichen.</small>
+            <label>Faktor (z.B. Stk/m²): <input type="number" id="material-edit-faktor"></label>
+            <label>Einheit (z.B. Stk): <input type="text" id="material-edit-einheit" list="unit-suggestions"></label>
+            <datalist id="unit-suggestions"></datalist>
+            <hr style="grid-column: 1 / -1; margin: 5px 0;">
+            <h5 style="grid-column: 1 / -1; margin: 0; text-align: center;">Lattmaße für die genaue Reihen-Berechnung (optional)</h5>
+            <label>Deckbreite (cm): <input type="number" step="0.1" id="material-edit-deckbreite" placeholder="21.4"></label>
+            <label>Decklänge (cm, Spanne): <input type="text" id="material-edit-decklaenge" placeholder="31,0 - 36,5"></label>
+            <label>Trauflattmaß (cm, Spanne): <input type="text" id="material-edit-trauflattmass" placeholder="leer = 34cm Annahme"></label>
+            <label>Firstlattmaß (cm): <input type="number" step="0.1" id="material-edit-firstlattmass" placeholder="4"></label>
+            <hr style="grid-column: 1 / -1; margin: 5px 0;">
+            <h5 style="grid-column: 1 / -1; margin: 0; text-align: center;">Zugehörige Faktoren (optional)</h5>
+            <label>First/Grat Faktor: <input type="number" id="material-edit-first-faktor"></label>
+            <label>First/Grat Einheit: <input type="text" id="material-edit-first-einheit" list="unit-suggestions"></label>
+            <label>Ortgang (links) Faktor: <input type="number" id="material-edit-ortgang-links-faktor"></label>
+            <label>Ortgang (rechts) Faktor: <input type="number" id="material-edit-ortgang-rechts-faktor"></label>
+        </div>
+        <div style="margin-top: 20px; display: flex; justify-content: flex-end; gap: 10px;">
+            <button id="btn-cancel-material-edit">Abbrechen</button>
+            <button id="btn-save-material-edit" style="background-color: #28a745; color: white;">Speichern</button>
+        </div>
+    </div>
+
+    <script>
+        // PWA: Service Worker registrieren, damit die App installierbar ist
+        // und offline funktioniert.
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch((err) => {
+                    console.warn('Service Worker konnte nicht registriert werden:', err);
+                });
+            });
+        }
+    </script>
+
+</body>
+</html>

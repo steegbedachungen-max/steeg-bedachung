@@ -1,0 +1,1830 @@
+/* ===============================================
+   TEIL 1: STILE VOM AUFMASS-TOOL (Final: Logo 440px rechts)
+===============================================*/
+
+/* Grundlegende Stile */
+body {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  margin: 0;
+  padding: 85px 12px 12px 12px; 
+  background: #f5f6f8;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 100vh;
+  transition: padding-top 0.2s ease-out;
+}
+
+body {
+    padding-top: 228px;
+}
+
+body.controls-open {
+    padding-top: 336px;
+}
+
+body.toolbox-hidden {
+    padding-top: 180px;
+}
+
+/* 1. Die Zeile zentriert den Titel und Button */
+.toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  justify-content: center; /* ZENTRIERT Titel & Button */
+  position: relative;      /* Wichtig: Ankerpunkt fÃ¼r das Logo */
+}
+
+.toolbar-row:first-child {
+  margin-bottom: 8px;
+  gap: 15px; 
+}
+
+/* 2. Das Logo wird "absolut" positioniert */
+.logo-wrapper {
+    position: absolute; /* Nimmt das Logo aus dem Fluss -> Titel bleibt mittig */
+    
+    left: 50%;          /* Startet in der Mitte des Bildschirms */
+    top: 50%;           /* Vertikal mittig */
+    transform: translateY(-50%); /* Exakte vertikale Zentrierung */
+    
+    margin-left: 440px; /* HIER EINGESTELLT: Exakt 440px */
+    z-index: 200;
+}
+
+.logo-wrapper label {
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    background: #fff;
+    padding: 4px;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.08); 
+    transition: transform 0.1s, box-shadow 0.1s;
+}
+
+.logo-wrapper label:hover {
+    transform: scale(1.02);
+    border-color: #bbb;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.12);
+}
+
+.logo-wrapper img {
+    height: 60px; 
+    width: auto;
+    object-fit: contain;
+    display: block;
+}
+
+.logo-hint {
+    font-size: 9px;
+    color: #999;
+    margin-top: 2px;
+    font-weight: 500;
+}
+
+/* Auf Handy/Tablet: Logo unter den Titel, alles normal zentriert */
+@media (max-width: 900px) {
+    .logo-wrapper {
+        position: relative; /* ZurÃ¼ck in den normalen Fluss */
+        left: auto;
+        top: auto;
+        transform: none;
+        margin: 10px auto;
+        margin-left: auto;
+    }
+    .logo-wrapper img {
+        height: 50px; 
+    }
+}
+/* ------------------------ */
+
+.fixed-controls-wrapper {
+    position: fixed;
+    top: 170px;
+    left: 0;
+    right: 0;
+    width: 100%;
+    z-index: 99;
+    background: #f5f6f8; 
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.fixed-controls-wrapper > .controls-container,
+.fixed-controls-wrapper > .toggle-container {
+    width: 100%;
+    max-width: 1200px;
+}
+
+h2 {
+  margin: 6px 0 12px 0;
+  text-align: center;
+}
+
+.tabs {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  max-width: 1200px;
+}
+.tab {
+  background: #fff;
+  padding: 8px 14px;
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab.active {
+  background: #0b66ff;
+  color: #fff;
+}
+
+/* Panel-Styles */
+.floating-panel {
+  display: none;
+  position: fixed;
+  top: 120px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #fff;
+  padding: 15px 20px;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+  z-index: 210; 
+  text-align: left;
+  border: 1px solid #ddd;
+}
+.floating-panel h4 {
+  margin: 0 0 12px 0;
+  text-align: center;
+}
+
+/* Distanz/Winkel: Header mit echtem Zentrieren + Toggle rechts */
+#dist-winkel-panel .dist-panel-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  margin: 0 0 12px 0;
+}
+
+#dist-winkel-panel .dist-panel-header .dist-panel-title {
+  grid-column: 2;
+  margin: 0;
+  text-align: center;
+}
+
+#dist-winkel-panel .dist-panel-header .panel-toggle-btn {
+  grid-column: 3;
+  justify-self: end;
+}
+
+/* Distanz-Panel: Titelzeile mit Toggle-Button */
+.dist-panel-title {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end; /* rechter Button bleibt rechts */
+  gap: 10px;
+  cursor: grab; /* bleibt Drag-Handle */
+  user-select: none;
+  min-height: 28px;
+}
+
+/* Überschrift wirklich optisch mittig, unabhängig von rechten Buttons */
+.dist-panel-title-text {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  text-align: center;
+  pointer-events: none; /* Drag bleibt am Header, Text blockiert nichts */
+}
+
+.panel-toggle-btn {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+
+  /* etwas größer, damit der Pfeil im Kästchen besser lesbar ist */
+  width: 34px;
+  height: 34px;
+
+  border-radius: 8px;
+  border: 1px solid #d0d0d0;
+  background: #f8f9fa;
+  cursor: pointer;
+
+  font-size: 20px;
+  line-height: 1;
+  padding: 0;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.panel-toggle-btn:hover {
+  background: #eef2ff;
+  border-color: #b9c7ff;
+}
+
+.panel-toggle-btn[aria-expanded="false"] {
+  transform: rotate(-90deg);
+}
+
+/* Pfeil-Button (Hilfspunkte): sichtbar lassen */
+#toggle-hilfspunkt {
+  display: inline-flex;
+}
+
+/* Optional: sekundärer Button im Panel */
+.secondary-action-btn {
+  background: #f1f3f5;
+  border: 1px solid #d6d6d6;
+  color: #222;
+  padding: 10px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.secondary-action-btn:hover {
+  background: #e9ecef;
+}
+
+#dist-winkel-panel {
+  top: 50%;
+
+  /* rechts im Arbeitsbereich anordnen */
+  left: auto;
+  right: 285px;
+  transform: translateY(-50%);
+
+  /* etwas breiter */
+  width: 390px;
+  max-width: calc(100vw - 40px);
+
+  /* Panel-Höhe reduzieren */
+  padding: 10px 12px;
+
+  /* Kein Auto-Grow über min-width */
+  min-width: 0;
+}
+
+/* Segment-Edit-Panel ebenfalls rechts im Arbeitsbereich andocken */
+#edit-panel {
+  top: 50%;
+
+  /* rechts im Arbeitsbereich anordnen (wie Distanz/Winkel) */
+  left: auto !important;
+  right: 285px !important;
+  transform: translateY(-50%) !important;
+
+  /* etwas breiter */
+  width: 390px !important;
+  max-width: calc(100vw - 40px) !important;
+
+  /* Panel-Höhe reduzieren */
+  padding: 10px 12px !important;
+
+  /* Kein Auto-Grow über min-width */
+  min-width: 0 !important;
+  box-sizing: border-box !important;
+}
+
+/* Auf kleineren Bildschirmen: nahezu volle Breite, aber weiterhin mit Rand */
+@media (max-width: 900px) {
+  #edit-panel {
+    width: 92vw;
+    max-width: 92vw;
+    right: 12px;
+  }
+}
+
+/* Auf kleineren Bildschirmen: nahezu volle Breite, aber weiterhin mit Rand */
+@media (max-width: 900px) {
+  #dist-winkel-panel {
+    width: 92vw;
+    max-width: 92vw;
+  }
+}
+
+/* Neue Flex-Row Styles für das Panel */
+.panel-input-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    width: 100%;
+}
+
+/* Option A: Richtung wählen + Betrag (ohne Minus) */
+.xy-row {
+  gap: 8px;
+}
+
+.xy-dir {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.xy-dir-btn {
+  width: 34px;
+  height: 30px;
+  border-radius: 8px;
+  border: 1px solid #cce0ff;
+  background: #f0f4ff;
+  color: #0b66ff;
+  font-weight: 800;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+}
+
+.xy-dir-btn.active {
+  /* aktiv: grün wie bei den Projekt-Eingaben */
+  background: #e9f8ee;
+  color: #1f7a3f;
+  border-color: #7bd89a;
+}
+
+.xy-dir-btn.active:hover {
+  background: #dcf3e4;
+}
+
+.xy-dir-btn:focus-visible {
+  outline: 3px solid rgba(34, 197, 94, 0.35);
+  outline-offset: 2px;
+}
+
+/* Styles für Edit-Panel Zeilen mit Schloss */
+.edit-row {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-bottom: 6px;
+    width: 100%;
+}
+
+.edit-row label {
+    flex: 1;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin: 0;
+}
+
+.lock-btn {
+    background-color: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    font-size: 1.2em;
+    padding: 4px;
+    min-height: 0;
+    min-width: 0;
+    margin: 0 0 0 5px;
+    line-height: 1;
+}
+
+.lock-btn:hover {
+    background-color: #f0f0f0;
+    border-radius: 4px;
+}
+
+.lock-btn.locked {
+    background-color: #ffeebb;
+    border-color: #e0c080;
+    border-radius: 4px;
+}
+
+/* DIE NEUEN BUTTONS: 4 Stück nebeneinander */
+.quick-angle-buttons {
+    display: flex;
+    justify-content: space-between;
+    gap: 5px;
+    margin-bottom: 10px;
+    margin-top: 5px;
+}
+
+.quick-angle-buttons button {
+    flex: 1;
+    font-size: 16px; /* Größere Pfeile */
+    padding: 8px 2px;
+    margin: 0;
+    background-color: #f0f4ff;
+    border: 1px solid #cce0ff;
+    font-weight: bold;
+    color: #0b66ff;
+}
+
+.quick-angle-buttons button:hover {
+    background-color: #dbeaff;
+}
+
+.floating-panel label {
+  display: flex;
+  align-items: center;
+  margin-bottom: 0; /* Geändert, da jetzt in Row */
+  gap: 5px;
+}
+
+/* Damit die Inputs in der Row rechtsbündig sind */
+.floating-panel .panel-input-row input[type="number"],
+.floating-panel .edit-row input[type="number"] {
+    margin-left: auto;
+}
+
+.floating-panel .calc-btn {
+  min-height: 0;
+  height: 30px;
+  width: 30px;
+  padding: 0;
+  margin: 0;
+  border-radius: 8px;
+  border: 1px solid #cce0ff;
+  background: #f0f4ff;
+  color: #0b66ff;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.floating-panel .calc-btn:hover {
+  background: #dbeaff;
+}
+
+/* Aktiver Zustand: Taschenrechner ist geöffnet (Toggle an) */
+.floating-panel .calc-btn.active {
+  background: #0b66ff;
+  border-color: #0b66ff;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(11, 102, 255, 0.4);
+}
+
+.floating-panel .calc-btn.active:hover {
+  background: #0a5ae0;
+  border-color: #0a5ae0;
+}
+
+.floating-panel .calc-btn:active {
+  transform: translateY(1px);
+}
+
+.floating-panel .calc-btn:focus-visible {
+  outline: 3px solid rgba(11, 102, 255, 0.35);
+  outline-offset: 2px;
+}
+
+/* eindeutiges Taschenrechner-Icon (SVG) */
+.floating-panel .calc-btn .calc-icon {
+  width: 18px;
+  height: 18px;
+  display: block;
+}
+
+/* Haupt-Button größer machen */
+.primary-action-btn.big-btn {
+    padding: 12px;
+    font-size: 1.1em;
+    margin-top: 10px;
+}
+
+.floating-panel .primary-action-btn {
+  width: 100%;
+  background-color: #0b66ff;
+  color: white;
+  font-weight: bold;
+  padding: 10px;
+  margin-top: 5px;
+}
+.floating-panel .primary-action-btn:hover {
+  background-color: #0056d6;
+}
+
+.floating-panel h4,
+#edit-panel h4,
+#calculator-modal h4 {
+  cursor: grab;
+  user-select: none;
+}
+
+.floating-panel.dragging h4,
+#edit-panel.dragging h4,
+#calculator-modal.dragging h4 {
+  cursor: grabbing;
+}
+
+#skizze, #aufmassblatt, #materialbedarf, #view-2d {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  max-width: 1200px;
+}
+#aufmassblatt, #materialbedarf, #view-2d {
+  display: none;
+  background: #fff;
+  padding: 12px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  width: 95%;
+  text-align: left;
+  box-sizing: border-box;
+}
+#materialbedarf {
+    align-items: center;
+}
+#view-2d {
+    background: none;
+    padding: 0;
+    box-shadow: none;
+    width: 100%;
+}
+
+.controls-container {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  background: #fff;
+  padding: 12px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  margin-bottom: 0;
+  width: 100%;
+  box-sizing: border-box;
+  transition: all 0.2s ease-out;
+  overflow: hidden;
+}
+
+.controls-container.is-hidden {
+    height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    margin-bottom: 0;
+    opacity: 0;
+    visibility: hidden;
+}
+
+.controls-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+  justify-content: center;
+}
+
+.controls-row label, .controls-row button {
+  margin: 0;
+}
+.controls-row label {
+   white-space: nowrap;
+   display: inline-flex;
+   align-items: center;
+}
+.controls-row .calc-btn {
+    min-height: 0;
+    height: 30px;
+    width: 30px;
+    padding: 2px;
+    font-size: 16px;
+    margin-left: 3px;
+    line-height: 1;
+}
+
+.actions {
+  display: flex;
+  gap: 15px;
+  align-items: center;
+}
+.small {
+  font-size: 13px;
+  color: #444;
+}
+
+.canvas-container {
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid #ccc;
+  background: #fff;
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+#skizze canvas {
+  background: #fff;
+  display: block;
+  margin: 0;
+  max-width: none;
+  cursor: grab;
+}
+
+/* Alte Edit-Panel-Regel deaktiviert (überschrieben weiter oben durch kompakte Docking-Regeln) */
+/*
+#edit-panel {
+  display: none;
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  left: auto; right: 20px; transform: translateY(-50%);
+  width: auto;
+  max-width: 90%;
+  min-width: 300px;
+  text-align: left;
+  background: #fff;
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.15);
+  z-index: 10;
+  margin-top: 0;
+}
+#edit-panel h4 { margin: 4px 0 8px 0; }
+#edit-panel label { margin-right: 0; }
+
+/* Buttons im Segment-Panel in eine Zeile (Anwenden | Abbrechen | Linie löschen) */
+#edit-panel .edit-actions-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: nowrap; /* alles in einer Zeile */
+  margin-top: 10px;
+}
+
+#edit-panel .edit-actions-row button {
+  margin: 0;
+  flex: 1 1 0;
+  white-space: nowrap;
+}
+
+#edit-panel .edit-actions-row .danger-btn {
+  background-color: #dc3545;
+  color: white;
+}
+*/
+
+#aufmassblatt > div:first-child {
+   width: 100%;
+   display: flex;
+   justify-content: space-between;
+   align-items: center;
+   margin-bottom: 10px;
+   flex-wrap: wrap;
+   gap: 10px;
+}
+#aufmassblatt h3 { margin: 0; }
+
+#skizzen-list { width: 100%; }
+
+.skizze-block {
+  border: 1px solid #e6e9ef;
+  padding: 10px;
+  margin-bottom: 14px;
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  background: #fafbff;
+  border-radius: 6px;
+}
+.skizze-block img {
+  width: 280px;
+  height: 180px;
+  object-fit: contain;
+  border: 1px solid #ddd;
+  background: #fff;
+  flex-shrink: 0;
+}
+.skizze-meta {
+  flex: 1;
+  min-width: 200px;
+}
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 8px;
+}
+th, td {
+  border: 1px solid #ccc;
+  padding: 6px 8px;
+  text-align: center;
+  font-size: 13px;
+}
+th {
+  background: #f0f8ff;
+}
+
+button, select, input {
+   padding: 8px 10px;
+   min-height: 38px;
+   font-size: 14px;
+   margin: 4px;
+   border: 1px solid #ccc;
+   border-radius: 8px;
+   background-color: #fff;
+   box-sizing: border-box;
+}
+
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active  {
+    -webkit-box-shadow: 0 0 0 30px white inset !important;
+    box-shadow: 0 0 0 30px white inset !important;
+    -webkit-text-fill-color: #000 !important; 
+}
+
+input[type="number"] {
+  width: 70px;
+}
+
+/* Beschriftung-Dropdown-Pfeil im Input ausblenden (Safari/Chrome/Edge) */
+#edit-label {
+  -webkit-appearance: none;
+  appearance: none;
+  background-image: none !important;
+  padding-right: 10px; /* kein Platz für Pfeil reservieren */
+}
+
+/* Chrome/Edge/Safari: Dropdown-/Picker-UI für datalist verstecken */
+#edit-label::-webkit-calendar-picker-indicator,
+#edit-label::-webkit-list-button {
+  display: none !important;
+  -webkit-appearance: none !important;
+  opacity: 0 !important;
+  width: 0 !important;
+  height: 0 !important;
+}
+
+/* Falls ein UA-Stylesheet einen Pfeil als Hintergrund setzt */
+#edit-label::-ms-expand {
+  display: none;
+}
+
+
+button {
+  background-color: #f8f9fa;
+  cursor: pointer;
+  color: #212529;
+  transition: background-color 0.15s ease-in-out;
+}
+button:hover {
+  background-color: #e9ecef;
+}
+button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  background-color: #f8f9fa;
+}
+
+.main-toolbar {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  background: #f5f6f8;
+  padding: 8px 12px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  z-index: 100;
+  transition: transform 0.3s ease-out, box-shadow 0.3s ease-out;
+}
+
+.main-toolbar.is-collapsed {
+    box-shadow: 0 2px 6px rgba(0,0,0,0.06);
+}
+.main-toolbar.is-collapsed .toolbar-row:nth-child(2),
+.main-toolbar.is-collapsed .toolbar-row:nth-child(3) {
+    display: none;
+}
+
+body.main-toolbar-collapsed .fixed-controls-wrapper {
+    top: 50px;
+}
+body.main-toolbar-collapsed {
+    padding-top: 216px;
+}
+body.main-toolbar-collapsed.controls-hidden {
+    padding-top: 108px;
+}
+body.main-toolbar-collapsed.toolbox-hidden {
+    padding-top: 60px;
+}
+
+.toolbar-divider {
+  border-left: 1px solid #ccc;
+  height: 25px;
+  margin: 0 5px;
+}
+
+#accessory-choice-modal,
+#window-choice-modal,
+#window-size-prefix-modal,
+#window-size-suffix-modal,
+#tile-choice-modal,
+#daemmung-choice-modal,
+#metall-choice-modal,
+#eindeckung-layers-modal {
+  position: fixed;
+  top: 50%;
+
+  /* rechts im Arbeitsbereich anordnen (wie Distanz/Winkel-Panel) */
+  left: auto;
+  right: 285px;
+  transform: translateY(-50%);
+
+  background: #fff;
+  padding: 25px 35px;
+  border-radius: 8px;
+  box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+  z-index: 20;
+  text-align: center;
+  border: 1px solid #ccc;
+
+  width: 390px;
+  max-width: calc(100vw - 40px);
+}
+
+#accessory-choice-modal h4,
+#window-choice-modal h4,
+#window-size-prefix-modal h4,
+#window-size-suffix-modal h4,
+#daemmung-choice-modal h4,
+#metall-choice-modal h4,
+#eindeckung-layers-modal h4,
+#tile-choice-modal h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 1.2em;
+}
+
+#accessory-item-buttons,
+#window-item-buttons,
+#window-size-prefix-buttons,
+#window-size-suffix-buttons,
+#tile-item-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+#accessory-item-buttons button,
+#window-item-buttons button,
+#window-size-prefix-buttons button,
+#window-size-suffix-buttons button,
+#tile-item-buttons button {
+  margin: 0;
+  min-width: 130px;
+  cursor: pointer;
+}
+#window-size-prefix-buttons button,
+#window-size-suffix-buttons button {
+    min-width: 60px;
+}
+
+#calculator-modal {
+    position: fixed;
+    top: 180px;
+    left: 50%;
+    left: auto; right: 20px; transform: translateY(-50%);
+    background: #fff;
+    padding: 14px;
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.18);
+    z-index: 200;
+    border: 1px solid #e6e9ef;
+    width: 300px;
+}
+
+#calculator-modal h4 {
+    margin-top: 0;
+    margin-bottom: 10px;
+    font-size: 1.05em;
+    text-align: center;
+}
+
+#calc-formula-display {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: right;
+    font-size: 0.85em;
+    color: #6b7280;
+    padding: 2px 6px;
+    margin-bottom: 4px;
+    min-height: 1.2em;
+    word-wrap: break-word;
+}
+
+#calc-display {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: right;
+    font-size: 1.6em;
+    padding: 10px 12px;
+    margin-bottom: 12px;
+    background: #f8fafc;
+    border: 1px solid #e5e7eb;
+    border-radius: 10px;
+}
+
+.calc-buttons {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+}
+
+.calc-buttons button {
+    min-height: 42px;
+    margin: 0;
+    font-size: 1.05em;
+    font-weight: 700;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    background: #ffffff;
+}
+
+.calc-buttons button:hover {
+    background: #f3f4f6;
+}
+
+/* Operatoren etwas abheben */
+#calc-add,
+#calc-subtract,
+#calc-multiply,
+#calc-divide {
+    background: #f0f4ff;
+    border-color: #cce0ff;
+    color: #0b66ff;
+}
+
+#calc-add:hover,
+#calc-subtract:hover,
+#calc-multiply:hover,
+#calc-divide:hover {
+    background: #dbeaff;
+}
+
+.calc-buttons .calc-equal {
+    grid-column: span 2;
+    background-color: #0b66ff;
+    border-color: #0b66ff;
+    color: white;
+}
+
+.calc-buttons .calc-equal:hover {
+    background-color: #0056d6;
+}
+
+.calc-buttons .calc-use {
+    grid-column: span 2;
+    background-color: #28a745;
+    border-color: #28a745;
+    color: white;
+}
+
+.calc-buttons .calc-use:hover {
+    background-color: #218838;
+}
+
+.scale-buttons {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: -2px;
+  margin-right: 5px;
+}
+
+.scale-buttons button {
+  padding: 4px 8px;
+  min-height: 30px;
+  height: 30px;
+  font-size: 13px;
+  margin: 0;
+  line-height: 1;
+}
+
+@media (max-width: 600px) {
+    .scale-buttons {
+        margin-left: 0;
+        margin-right: 0;
+    }
+}
+
+.formula {
+  font-size: 0.9em;
+  color: #555;
+  font-weight: 400;
+  font-style: italic;
+  margin-left: 8px;
+  display: inline;
+}
+
+/* Beim PDF-Export werden die technischen Rechenformeln ausgeblendet,
+   damit das Dokument übersichtlich bleibt (nur Materialname + Menge). */
+.pdf-export-mode .formula {
+  display: none;
+}
+
+/* Beim PDF-Export sollen die Skizzen-Namen als reiner Text erscheinen
+   statt als klickbare Buttons (die Info "welche Skizze" bleibt sichtbar,
+   aber ohne Button-Optik). */
+.pdf-export-mode .sketch-buttons-placeholder button {
+  border: none;
+  background: none;
+  padding: 0;
+  margin-right: 10px;
+  font-style: normal;
+  color: #333;
+  cursor: default;
+  font-size: 0.95em;
+}
+.pdf-export-mode .sketch-buttons-placeholder button::after {
+  content: ",";
+}
+.pdf-export-mode .sketch-buttons-placeholder button:last-child::after {
+  content: "";
+}
+
+@media (max-width: 600px) {
+  .formula {
+    display: block;
+    margin-left: 10px;
+    margin-top: 4px;
+  }
+}
+
+.material-filters {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 15px;
+  justify-content: center;
+  width: 100%;
+  flex-wrap: wrap;
+}
+.material-filters button {
+  min-width: 100px;
+  background: #fff;
+  border: 1px solid #ccc;
+}
+.material-filters button.active {
+  background: #0b66ff;
+  color: #fff;
+  border-color: #0b66ff;
+}
+
+#material-list-container {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+#material-block {
+  width: 100%;
+  max-width: 600px;
+}
+
+/* ===============================================
+   TEIL 2: STILE VON 2D-APP (Angepasst & gescoped)
+===============================================*/
+
+#view-2d #container {
+  border: 1px solid #999;
+  width: 100%;
+  box-sizing: border-box;
+  height: 800px;
+  background: #fff;
+}
+#view-2d #buttons {
+  padding: 10px;
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+  margin-bottom: 10px;
+  width: 100%;
+  box-sizing: border-box;
+  justify-content: center;
+}
+#view-2d #load-input {
+  display: none;
+}
+#view-2d #load-label {
+  background: #e0e0e0;
+  border: 1px solid #ccc;
+  padding: 5px 10px;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 14px;
+}
+#view-2d #load-label:hover {
+  background: #d5d5d5;
+}
+
+#view-2d button {
+  padding: 5px 10px;
+  font-size: 14px;
+  cursor: pointer;
+  min-height: 0;
+  margin: 0;
+}
+
+#view-2d #rotation-panel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 15px; 
+}
+
+#view-2d #rotation-panel label {
+  font-size: 13px;
+  color: #222;
+}
+#view-2d input[type=number] {
+  width: 60px;
+  padding: 4px 6px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  font-size: 14px;
+  min-height: 0;
+  margin: 0;
+}
+#view-2d .rot-btn {
+  width: 36px;
+  padding: 4px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #f8f8f8;
+  font-size: 13px;
+}
+#view-2d .rot-btn:hover {
+  background: #eee;
+}
+#view-2d .small-btn {
+  padding: 3px 6px;
+  font-size: 12px;
+  border: 1px solid #bbb;
+  border-radius: 6px;
+  background: #fafafa;
+}
+#view-2d .small-btn:hover {
+  background: #eee;
+}
+#view-2d #zoom-indicator {
+  position: fixed;
+  bottom: 10px;
+  right: 14px;
+  background: #000a;
+  color: #fff;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  z-index: 100;
+}
+
+#view-2d #label-rotation-panel {
+  position: fixed;
+  display: none;
+  background: #ffffffcc;
+  backdrop-filter: blur(6px);
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .08);
+  z-index: 100;
+  display: none; 
+  gap: 5px;
+}
+
+#view-2d #label-rotation-panel button {
+  padding: 3px 8px;
+  font-size: 13px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #f8f8f8;
+  cursor: pointer;
+}
+#view-2d #label-rotation-panel button:hover {
+  background: #eee;
+}
+
+#view-2d .scale-btn-2d {
+    padding: 4px 8px;
+    font-size: 13px;
+    min-height: 0;
+    margin: 0;
+    background: #f0f0f0;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-weight: 500;
+}
+#view-2d .scale-btn-2d.active {
+    background: #0b66ff;
+    color: white;
+    border-color: #0b66ff;
+    font-weight: bold;
+}
+#view-2d .scale-btn-2d:not(.active):hover {
+    background: #e0e0e0;
+}
+#view-2d .toggle-button {
+    padding: 0;
+    font-size: 16px;
+    min-height: 38px;
+    height: 38px;
+    width: 38px;
+    line-height: 38px;
+    border-radius: 50%;
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    margin: 0;
+    text-align: center;
+}
+#view-2d .toggle-button:hover {
+    background-color: #e0e0e0;
+}
+
+#view-2d #measure-btn.active {
+  background-color: #28a745;
+  color: white;
+  border-color: #218838;
+  font-weight: bold;
+}
+
+#view-2d #measure-btn.active:hover {
+  background-color: #218838;
+}
+
+#snap-90-degree-btn {
+    font-weight: bold;
+    background-color: #f0f0f0;
+    border: 1px solid #bbb;
+}
+
+#snap-90-degree-btn:hover {
+    background-color: #e0e0e0;
+}
+
+#snap-90-degree-btn.active {
+    background-color: #0b66ff;
+    color: white;
+    border-color: #0056d6;
+}
+
+.hide-for-export button {
+    display: none !important;
+}
+
+
+#view-2d #label-rotation-panel {
+    cursor: grab;
+    user-select: none;
+}
+#view-2d #label-rotation-panel.dragging {
+    cursor: grabbing;
+}
+
+.winkel-kompass {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  border: 1px solid #ccc;
+  border-radius: 50%;
+  margin: 0;
+  padding: 0;
+  background: #f9f9f9;
+  box-sizing: border-box;
+}
+
+.kompass-pfeil {
+  font-size: 20px;
+  font-weight: bold;
+  color: #e74c3c;
+  transform: rotate(0deg);
+  transition: transform 0.2s ease-out;
+  line-height: 1;
+  user-select: none;
+}
+
+.toggle-container {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    max-width: 1200px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    transition: margin-top 0.2s ease-out;
+}
+
+.toggle-button {
+    padding: 0;
+    font-size: 16px;
+    min-height: 38px; 
+    height: 38px;
+    width: 38px;
+    line-height: 38px;
+    border-radius: 50%;
+    background-color: #f0f0f0;
+    border: 1px solid #ccc;
+    margin: 0;
+    text-align: center;
+}
+.toggle-button:hover {
+    background-color: #e0e0e0;
+}
+
+#main-toolbar-toggle-btn {
+    font-size: 20px;
+}
+
+.controls-container.is-hidden + .toggle-container {
+    margin-top: 0;
+}
+
+#panel-actions-dist-winkel,
+#panel-finished-actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+    width: 100%;
+}
+
+#panel-actions-dist-winkel button,
+#panel-finished-actions button {
+    flex: 1;
+}
+
+#btn-panel-undo {
+    background-color: #f0f0f0;
+}
+
+
+@media (max-width: 1024px) {
+    #dist-winkel-panel {
+        top: 297px;
+        left: 15px;
+        transform: none;
+        width: 360px;
+        max-width: calc(100vw - 30px);
+    }
+    
+    #skizze.controls-hidden #dist-winkel-panel {
+        top: 159px; 
+    }
+
+    #tile-choice-modal,
+    #daemmung-choice-modal,
+    #metall-choice-modal,
+    #eindeckung-layers-modal {
+        top: 297px;
+        left: 15px;
+        right: auto;
+        transform: none;
+        width: 360px;
+        max-width: calc(100vw - 30px);
+    }
+    
+    #edit-panel {
+        top: 297px; 
+        left: 15px; 
+        transform: none; 
+        width: 300px; 
+        min-width: 300px;
+    }
+    
+    #skizze.controls-hidden #edit-panel {
+        top: 159px; 
+    }
+    
+    #calculator-modal {
+        top: 380px; 
+        left: 15px;
+        transform: none;
+    }
+    
+    #skizze.controls-hidden #calculator-modal {
+        top: 250px; 
+    }
+    
+    .controls-row .scale-buttons button {
+        min-height: 44px;
+        min-width: 44px;
+        font-size: 14px;
+    }
+    
+    .controls-row .calc-btn {
+        min-height: 44px;
+        height: 44px;
+        width: 44px;
+        font-size: 22px;
+    }
+    
+    .floating-panel .calc-btn {
+        min-height: 44px;
+        height: 44px;
+        width: 44px;
+        font-size: 22px;
+    }
+    
+    .winkel-kompass {
+        min-height: 44px;
+        height: 44px;
+        width: 44px;
+    }
+    
+    .kompass-pfeil {
+        font-size: 24px;
+    }
+    
+    button, select, input {
+       min-height: 44px;
+       font-size: 16px;
+    }
+    
+    .toggle-button {
+        min-height: 44px;
+        height: 44px;
+        width: 44px;
+        line-height: 44px;
+        font-size: 20px;
+        border-radius: 50%;
+    }
+}
+
+#view-2d #buttons {
+  margin-bottom: 0; 
+}
+
+#view-2d .toggle-container {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+    max-width: 1200px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    transition: margin-top 0.2s ease-out;
+}
+
+#view-2d .controls-container.is-hidden + .toggle-container {
+    margin-top: 0; 
+}
+
+#view-2d #buttons.controls-container {
+    flex-direction: row;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+}
+
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 10mm;
+  }
+  html, body {
+    width: 210mm;
+    height: 297mm;
+    margin: 0 auto;
+    background: white;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    padding: 0;
+  }
+  * { box-sizing: border-box; max-width: 100%; }
+  button, nav, .no-print, .tabs, .controls-container, #edit-panel, #export-choice-modal, #accessory-choice-modal, #calculator-modal, #window-choice-modal, #window-size-prefix-modal, #window-size-suffix-modal, #tile-choice-modal, #daemmung-choice-modal, #metall-choice-modal, #eindeckung-layers-modal, .main-toolbar { display: none !important; }
+  h2 { display: none; }
+  #skizze { display: none !important; }
+  #aufmassblatt {
+      display: block !important;
+      box-shadow: none;
+      border: none;
+      width: 100%;
+      padding: 0;
+      margin: 0;
+  }
+   #materialbedarf {
+       display: block !important;
+       box-shadow: none;
+       border: none;
+       width: 100%;
+       padding: 0;
+       margin: 0;
+       page-break-before: always;
+   }
+   .skizze-block {
+      page-break-inside: avoid;
+      border: 1px solid #ccc;
+      background: #fff;
+   }
+   .skizze-block img { border: 1px solid #bbb; }
+}
+
+#export-choice-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  left: auto; right: 20px; transform: translateY(-50%);
+  background: #fff;
+  padding: 25px 35px;
+  border-radius: 8px;
+  box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+  z-index: 20;
+  text-align: center;
+  border: 1px solid #ccc;
+}
+#export-choice-modal h4 {
+  margin-top: 0;
+  margin-bottom: 20px;
+  font-size: 1.2em;
+}
+#export-choice-modal div {
+  margin-bottom: 10px;
+}
+#export-choice-modal button {
+  margin: 5px 8px;
+  min-width: 110px;
+  cursor: pointer;
+}
+
+/* ===============================================
+   PROJEKTDATEN ALS BUTTONS (Modern UI)
+===============================================*/
+.project-data-row {
+    gap: 12px;
+    transition: height 0.2s ease-out, opacity 0.2s ease-out, margin 0.2s ease-out, padding 0.2s ease-out, gap 0.2s ease-out;
+    overflow: hidden;
+}
+
+/* Der "Button" Look im Grundzustand */
+.project-input {
+    background-color: #e4e7eb;
+    border: 2px solid transparent;
+    padding: 8px 16px;
+    border-radius: 20px; /* Macht es optisch zu runden Buttons (Pills) */
+    font-size: 14px;
+    font-weight: 600;
+    color: #495057;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    width: 140px;
+    text-align: center;
+}
+
+/* Textfarbe des Platzhalters (z.B. "Name ✎") */
+.project-input::placeholder {
+    color: #495057;
+    opacity: 1;
+}
+
+/* Wenn man reinklickt (Eingabe-Modus) */
+.project-input:focus {
+    background-color: #ffffff;
+    border: 2px solid #0b66ff;
+    cursor: text;
+    width: 220px; /* Feld wird beim Tippen animiert breiter */
+    text-align: left;
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(11, 102, 255, 0.2);
+}
+
+/* Wenn Text drin steht (Erfolgreich ausgefüllt) */
+.project-input:not(:placeholder-shown) {
+    background-color: #e8f5e9; /* Leicht grüner Hintergrund */
+    border: 2px solid #28a745; /* Grüner Rand */
+    color: #155724; /* Dunkelgrüne Schrift */
+    text-align: center;
+    /* Fügt ein kleines SVG-Häkchen auf der rechten Seite ein */
+    background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2328a745"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></svg>');
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 18px;
+    padding-right: 32px; /* Platz für das Häkchen machen */
+}
+
+/* Damit das Häkchen verschwindet, wenn man den Text wieder bearbeitet */
+.project-input:focus:not(:placeholder-shown) {
+    background-image: none;
+    padding-right: 16px;
+    text-align: left;
+}
+/* ===============================================
+   ANSICHT-UMSCHALTER: Desktop / iPad mini 6 (Hochformat)
+===============================================*/
+
+/* Buttons in der Haupt-Toolbar */
+.view-switch {
+  display: inline-flex;
+  gap: 4px;
+  background: #eef1f6;
+  border: 1px solid #d7dce6;
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.view-switch .view-btn {
+  margin: 0;
+  min-height: 34px;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: #45546b;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.view-switch .view-btn:hover {
+  background: #e2e8f3;
+}
+
+.view-switch .view-btn.active {
+  background: #0b66ff;
+  color: #fff;
+  box-shadow: 0 2px 6px rgba(11, 102, 255, 0.35);
+}
+
+.view-switch .view-btn.active:hover {
+  background: #0a5ae0;
+}
+
+.view-switch .view-btn:focus-visible {
+  outline: 3px solid rgba(11, 102, 255, 0.35);
+  outline-offset: 2px;
+}
+
+/* ---- iPad-mini-6-Modus (Hochformat: 768 x 1024 logische Punkte) ---- */
+/* Aktiv, wenn <body class="view-ipad"> gesetzt ist. Desktop bleibt unverändert. */
+
+body.view-ipad {
+  /* Arbeitsfläche auf iPad-mini-Breite begrenzen und zentrieren */
+  --ipad-width: 768px;
+}
+
+/* Inhalts-Spalten auf iPad-Breite eindampfen */
+body.view-ipad .fixed-controls-wrapper > .controls-container,
+body.view-ipad .fixed-controls-wrapper > .toggle-container,
+body.view-ipad .tabs,
+body.view-ipad #skizze,
+body.view-ipad #aufmassblatt,
+body.view-ipad #materialbedarf,
+body.view-ipad #view-2d {
+  max-width: var(--ipad-width);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Schwebende Panels iPad-Modus: sauber in der Bildschirmmitte zentrieren.
+   WICHTIG: kein !important auf left/top/transform, sonst kann die
+   Drag-Funktion (die genau diese Werte per Inline-Style setzt) das Panel
+   nicht mehr bewegen und es springt beim ersten Antippen. */
+body.view-ipad #dist-winkel-panel,
+body.view-ipad #edit-panel,
+body.view-ipad #tile-choice-modal,
+body.view-ipad #daemmung-choice-modal,
+body.view-ipad #metall-choice-modal,
+body.view-ipad #eindeckung-layers-modal {
+  left: 50%;
+  right: auto;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 360px;
+  max-width: calc(100vw - 24px);
+}
+
+/* Modale (Rechner, Auswahl-Dialoge) innerhalb der iPad-Breite zentrieren */
+body.view-ipad #calculator-modal,
+body.view-ipad #accessory-choice-modal,
+body.view-ipad #window-choice-modal,
+body.view-ipad #window-size-prefix-modal,
+body.view-ipad #window-size-suffix-modal {
+  left: 50% !important;
+  right: auto !important;
+  transform: translate(-50%, -50%) !important;
+  top: 50% !important;
+}
+
+/* 2D-Canvas-Container auf iPad-Höhe (Hochformat) begrenzen */
+body.view-ipad #view-2d #container {
+  height: 620px;
+}
+
+/* Notizen-Bereich an Hochformat anpassen */
+body.view-ipad #notizen-container {
+  max-width: var(--ipad-width);
+  margin-left: auto;
+  margin-right: auto;
+}
+
+/* Hinweis-Rahmen, der die iPad-Arbeitsfläche sichtbar markiert */
+body.view-ipad #skizze .canvas-container {
+  max-width: var(--ipad-width);
+}
+
+/* ===============================================
+   iPad-Modus: OBERE LEISTEN an Hochformat (768px) anpassen
+===============================================*/
+
+/* Haupt-Toolbar selbst auf iPad-Breite begrenzen, Inhalte zentrieren */
+body.view-ipad .main-toolbar {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+body.view-ipad .main-toolbar .toolbar-row {
+  width: 100%;
+  max-width: var(--ipad-width);
+  margin-left: auto;
+  margin-right: auto;
+  box-sizing: border-box;
+}
+
+/* Logo im iPad-Modus: komplett in den normalen Zeilenfluss zurückholen
+   (nicht mehr absolut positioniert). So kollidiert es nie mit dem
+   Titel/den View-Buttons und wird bei Platzmangel einfach umgebrochen
+   (die .toolbar-row hat bereits flex-wrap: wrap). */
+body.view-ipad .main-toolbar .toolbar-row:first-child {
+  justify-content: center;
+}
+
+body.view-ipad .logo-wrapper {
+  position: static;
+  left: auto;
+  right: auto;
+  top: auto;
+  transform: none;
+  margin: 4px 0 0 0;
+}
+
+body.view-ipad .logo-wrapper img {
+  height: 34px;
+}
+
+/* Projekt-Eingaben kompakter und umbrechend, damit sie in 768px passen */
+body.view-ipad .project-data-row {
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  row-gap: 8px;
+}
+
+body.view-ipad .project-input {
+  width: auto;
+  flex: 0 1 auto;
+  min-width: 120px;
+  max-width: 150px;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+/* Beim Tippen nicht uebermaessig breit werden (sonst sprengt es die Zeile) */
+body.view-ipad .project-input:focus {
+  width: auto;
+  max-width: 220px;
+}
+
+/* Tabs: bei Bedarf umbrechen statt zu quetschen */
+body.view-ipad .tabs {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+body.view-ipad .tab {
+  padding: 8px 12px;
+  font-size: 14px;
+}
+
+/* Etwas mehr Platz nach oben, da Projektfelder ggf. umbrechen */
+body.view-ipad {
+  padding-top: 260px;
+}
+
+body.view-ipad.controls-open {
+  padding-top: 368px;
+}
+
+body.view-ipad.controls-hidden {
+  padding-top: 260px;
+}
