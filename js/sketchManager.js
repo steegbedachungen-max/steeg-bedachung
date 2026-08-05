@@ -32,7 +32,7 @@ function doSave(sketchName) {
 
     let accessoriesData = {};
     let materialData = null;
-    let daemmungData = null;
+    let daemmungItemsData = [];
     let metallItemsData = [];
     let eindeckungLayersData = [];
     const editIndex = dataState.currentlyEditingSketchIndex;
@@ -45,8 +45,8 @@ function doSave(sketchName) {
         if (savedSketches[editIndex].material) {
             materialData = savedSketches[editIndex].material;
         }
-        if (savedSketches[editIndex].daemmung) {
-            daemmungData = savedSketches[editIndex].daemmung;
+        if (savedSketches[editIndex].daemmungItems) {
+            daemmungItemsData = savedSketches[editIndex].daemmungItems;
         }
         if (savedSketches[editIndex].metallItems) {
             metallItemsData = savedSketches[editIndex].metallItems;
@@ -67,7 +67,7 @@ function doSave(sketchName) {
         segmentInclusion: newSegmentInclusion,
         accessories: accessoriesData,
         material: materialData,
-        daemmung: daemmungData,
+        daemmungItems: daemmungItemsData,
         metallItems: metallItemsData,
         eindeckungLayers: eindeckungLayersData
     };

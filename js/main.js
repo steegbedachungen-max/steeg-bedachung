@@ -16,7 +16,7 @@ import {
     cancelTileChoice,
     inlineEditSketchName,
     openDaemmungChoiceModal,
-    selectDaemmung,
+    applyDaemmungChoice,
     cancelDaemmungChoice,
     openMetallChoiceModal,
     applyMetallChoice,
@@ -45,6 +45,7 @@ import './2D/2D_main.js'; // Load the 2D app logic
 import { initMaterialDataManager, setOnDataChangedCallback } from './materialDataManager.js';
 import { initNotizen } from './notizenManager.js'; // <-- NEU HINZUGEFÜGT
 import { initProjectStartDialog } from './projectStartDialog.js';
+import { tryRestoreAutosave, startAutosave } from './autosaveManager.js';
 
 
 // --- INIT ---
@@ -102,7 +103,7 @@ window.cancelWindowSizeSuffix = cancelWindowSizeSuffix;
 window.openTileChoiceModal = openTileChoiceModal;
 window.selectMainTile = selectMainTile;
 window.openDaemmungChoiceModal = openDaemmungChoiceModal;
-window.selectDaemmung = selectDaemmung;
+window.applyDaemmungChoice = applyDaemmungChoice;
 window.cancelDaemmungChoice = cancelDaemmungChoice;
 window.openMetallChoiceModal = openMetallChoiceModal;
 window.applyMetallChoice = applyMetallChoice;
@@ -129,19 +130,29 @@ console.log("Anwendung modular initialisiert. Alle Funktionen verbunden.");
 
 
 // --- TAB-NAVIGATION & UI LOGIK ---
-document.addEventListener('DOMContentLoaded', () => {
-    
+document.addEventListener('DOMContentLoaded', async () => {
+
     // Projektfelder beim Start leeren (verhindert Browser-Autofill)
     ['projekt-bauvorhaben', 'projekt-name', 'projekt-anschrift', 'projekt-telefon', 'projekt-email'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
 
-    // Gezielte Abfrage der Projektdaten beim Programmstart
-    initProjectStartDialog();
+    // Initialisiere das Notizen-Whiteboard (muss VOR einer evtl.
+    // Autosave-Wiederherstellung laufen, da diese die Notizen-Layer befüllt)
+    initNotizen();
 
-    // Initialisiere das Notizen-Whiteboard
-    initNotizen(); 
+    // Prüft, ob ein automatisch gespeicherter Stand (Autosave) vorliegt und
+    // stellt ihn bei Bestätigung wieder her. Nur wenn NICHT wiederhergestellt
+    // wurde, erscheint die normale Projekt-Start-Abfrage - sonst stünden
+    // widersprüchliche/leere Felder neben den gerade wiederhergestellten Daten.
+    const restored = await tryRestoreAutosave();
+    if (!restored) {
+        initProjectStartDialog();
+    }
+
+    // Autosave (periodisch + bei App-Hintergrund/-Schließung) starten.
+    startAutosave();
 
     const tabSkizze = document.getElementById('tab-skizze');
     const tabBlatt = document.getElementById('tab-blatt');

@@ -1,32 +1,36 @@
 // js/2D/uiTopBar.js
 
 import { layer, stage, gridLayer, updateGrid } from './stage.js';
-import { 
-    labelsVisible, setLabelsVisible, 
+import {
+    labelsVisible, setLabelsVisible,
     snapEnabled, setSnapEnabled,
     setActiveScale,
     gridVisible, setGridVisible,
     selectedNode, setSelectedNode, getUserData,
-    lastPvModuleSize, setLastPvModuleSize, incrementPvCascadeCount
+    lastPvModuleSize, setLastPvModuleSize, incrementPvCascadeCount,
+    autoDimensionVisible, setAutoDimensionVisible
 } from './state.js';
 
-import { reDrawAllFigures, addPVModule, addWindow } from './figure.js';
+import { reDrawAllFigures, addPVModule, addWindow, addObstacle } from './figure.js';
 import { nudgeSelectedNode, highlightNode } from './selection.js';
+import { refreshAutoDimensions } from './autoDimension.js';
 
-import { 
-    toggleMeasurementMode, 
+import {
+    toggleMeasurementMode,
     initMeasurementModule,
-    clearAllMeasurements 
+    clearAllMeasurements
 } from './measurement.js';
 
 // --- Variablen deklarieren ---
 let snapBtn, labelToggleBtn;
 let gridBtn;
+let autodimToggleBtn;
 let scaleBtn25, scaleBtn50, scaleBtn100;
 let allScaleBtns = [];
 let addPvBtn;
 let addPvRepeatBtn;
-let addWindowBtn; 
+let addWindowBtn;
+let addObstacleBtn;
 let toggleBtn2D;
 let controlsContainer2D;
 
@@ -93,8 +97,10 @@ export function initTopBar() {
     
     addPvBtn = document.getElementById("add-pv-btn");
     addPvRepeatBtn = document.getElementById("add-pv-repeat-btn");
-    addWindowBtn = document.getElementById("add-window-btn"); 
-    
+    addWindowBtn = document.getElementById("add-window-btn");
+    addObstacleBtn = document.getElementById("add-obstacle-btn");
+    autodimToggleBtn = document.getElementById("autodim-toggle-btn");
+
     const measureBtn = document.getElementById("measure-btn");
     toggleBtn2D = document.getElementById("toggle-controls-btn-2d"); 
     controlsContainer2D = document.getElementById("buttons");
@@ -136,6 +142,17 @@ export function initTopBar() {
             gridBtn.textContent = gridVisible ? "Grid: AN" : "Grid: AUS";
             gridLayer.visible(gridVisible);
             stage.batchDraw();
+        };
+    }
+
+    // --- Autobemaßung: zeigt automatisch den Abstand jedes Objekts (PV-Modul,
+    // Fenster, Hindernis) zur nächsten Dachkante sowie zum nächsten anderen
+    // Objekt an (kein fester Mindestabstand - nur der gemessene IST-Wert).
+    if (autodimToggleBtn) {
+        autodimToggleBtn.onclick = () => {
+            setAutoDimensionVisible(!autoDimensionVisible);
+            autodimToggleBtn.textContent = autoDimensionVisible ? "📐 Autobemaßung: AN" : "📐 Autobemaßung: AUS";
+            refreshAutoDimensions();
         };
     }
 
@@ -205,6 +222,27 @@ export function initTopBar() {
             windowModal.style.display = 'none';
         };
     });
+
+    // --- Hindernis einfügen (z.B. Kamin, Lüfter, Dachflächenfenster ohne PV) ---
+    // Wird als eigenes Objekt auf der 2D-Fläche platziert und nimmt danach wie
+    // jedes andere Objekt an der Autobemaßung (Abstand zu Dachkante/Nachbarn) teil.
+    if (addObstacleBtn) {
+        addObstacleBtn.onclick = async () => {
+            const name = await window.showPrompt("Hindernis einfügen", "Bezeichnung (z.B. Kamin, Lüfter, Antenne):", "Kamin");
+            if (!name) return;
+            const wStr = await window.showPrompt("Hindernis einfügen", "Breite in Metern:", "0.5");
+            if (wStr === null || wStr === undefined || wStr === "") return;
+            const hStr = await window.showPrompt("Hindernis einfügen", "Höhe/Tiefe in Metern:", "0.5");
+            if (hStr === null || hStr === undefined || hStr === "") return;
+            const w = parseFloat(String(wStr).replace(',', '.'));
+            const h = parseFloat(String(hStr).replace(',', '.'));
+            if (!isFinite(w) || !isFinite(h) || w <= 0 || h <= 0) {
+                if (window.showAlert) window.showAlert("Ungültige Eingabe", "Bitte gültige Maße (in Metern) eingeben.");
+                return;
+            }
+            addObstacle(name, w, h);
+        };
+    }
 
     if (toggleBtn2D && controlsContainer2D) {
         const isInitiallyHidden = controlsContainer2D.classList.contains('is-hidden');

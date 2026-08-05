@@ -37,6 +37,50 @@ function getNextImageY(startY = 50, gap = 20) {
     return maxBottom + gap;
 }
 
+// Komprimiert ein hochgeladenes Foto auf die Auflösung, die für die
+// tatsächliche Anzeige-/Exportgröße benötigt wird, statt die volle
+// Kamera-Auflösung (z.B. 8-12 MP vom iPad) im Speicher und im Autosave zu
+// behalten. IMAGE_COMPRESSION_PIXEL_RATIO liegt bewusst etwas über dem
+// pixelRatio des PDF-Exports (1.5, siehe getNotizenImage()), damit Fotos
+// auch im Export und bei Retina-Displays noch scharf wirken.
+const IMAGE_COMPRESSION_PIXEL_RATIO = 2;
+const IMAGE_COMPRESSION_QUALITY = 0.85;
+
+/**
+ * Rendert imgObj auf ein Offscreen-Canvas in der Zielauflösung (Anzeigegröße
+ * × IMAGE_COMPRESSION_PIXEL_RATIO) und gibt eine komprimierte JPEG-Data-URL
+ * zurück. Gibt null zurück, wenn das Original ohnehin schon kleiner/gleich
+ * der Zielauflösung ist (kein sinnvolles Hochskalieren) oder das Canvas aus
+ * irgendeinem Grund fehlschlägt - in beiden Fällen soll die Original-Data-URL
+ * weiterverwendet werden.
+ */
+function compressImageDataUrl(imgObj, targetDisplayWidth, targetDisplayHeight) {
+    const targetW = Math.max(1, Math.round(targetDisplayWidth * IMAGE_COMPRESSION_PIXEL_RATIO));
+    const targetH = Math.max(1, Math.round(targetDisplayHeight * IMAGE_COMPRESSION_PIXEL_RATIO));
+
+    if (!imgObj.naturalWidth || !imgObj.naturalHeight) return null;
+    if (imgObj.naturalWidth <= targetW && imgObj.naturalHeight <= targetH) return null;
+
+    try {
+        const canvas = document.createElement('canvas');
+        canvas.width = targetW;
+        canvas.height = targetH;
+        const ctx = canvas.getContext('2d');
+        // Weißer Hintergrund, falls das Original Transparenz enthält (z.B.
+        // ein PNG-Screenshot) - JPEG kennt keine Transparenz und würde sie
+        // sonst als Schwarz rendern.
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, targetW, targetH);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(imgObj, 0, 0, targetW, targetH);
+        return canvas.toDataURL('image/jpeg', IMAGE_COMPRESSION_QUALITY);
+    } catch (e) {
+        console.error('Bildkomprimierung fehlgeschlagen, verwende Original:', e);
+        return null;
+    }
+}
+
 export function initNotizen() {
     const container = document.getElementById('notizen-container');
     if (!container) return;
@@ -147,16 +191,36 @@ export function initNotizen() {
                     konvaImg.height(maxHeight);
                     konvaImg.width(konvaImg.width() * ratio2);
                 }
+                // Bild auf die tatsächlich benötigte Auflösung komprimieren
+                // (siehe compressImageDataUrl oben), damit z.B. hochauflösende
+                // iPad-Kamerafotos nicht in voller Größe im Speicher und im
+                // Autosave landen. Bei kleinen Bildern (schon <= Zielgröße)
+                // liefert die Funktion null zurück - dann bleibt das Original.
+                const compressedDataUrl = compressImageDataUrl(imgObj, konvaImg.width(), konvaImg.height());
+
+                // Data-URL (komprimiert, falls möglich, sonst Original) am
+                // Node hinterlegen, damit serializeNotizen() (siehe unten,
+                // für den Autosave) das Bild später wiederherstellen kann -
+                // Konva selbst speichert nur eine Referenz auf das
+                // <img>-Element, keine wiederverwendbaren Bilddaten.
+                konvaImg.setAttr('sourceDataUrl', compressedDataUrl || event.target.result);
+
                 objectLayer.add(konvaImg);
                 tr.nodes([konvaImg]);
                 tr.moveToTop();
-                konvaImg.on('mousedown touchstart', () => { tr.nodes([konvaImg]); tr.moveToTop(); });
-                konvaImg.on('dblclick dbltap', async () => {
-                     if(await showConfirm("Bild löschen?", "Soll dieses Bild entfernt werden?")) {
-                         tr.nodes([]); 
-                         konvaImg.destroy();
-                     }
-                });
+                wireImageInteractions(konvaImg);
+
+                if (compressedDataUrl) {
+                    // Auch die im Speicher gehaltene Bildquelle selbst auf
+                    // die komprimierte Version umstellen, statt intern
+                    // weiter das volle Originalbild im RAM zu halten.
+                    const compressedImgObj = new Image();
+                    compressedImgObj.onload = function () {
+                        konvaImg.image(compressedImgObj);
+                        objectLayer.batchDraw();
+                    };
+                    compressedImgObj.src = compressedDataUrl;
+                }
             };
             imgObj.src = event.target.result;
         };
@@ -174,6 +238,20 @@ export function initNotizen() {
             tr = new Konva.Transformer({ keepRatio: true, padding: 5, borderStroke: '#0b66ff' });
             objectLayer.add(tr);
         }
+    });
+}
+
+// Verdrahtet die Interaktionen (auswählen, per Doppelklick löschen) für ein
+// eingefügtes Bild. Ausgelagert, damit sowohl neu hochgeladene Bilder als
+// auch beim Wiederherstellen eines Autosaves neu erzeugte Bilder dieselbe
+// Logik nutzen (siehe restoreNotizen() weiter unten).
+function wireImageInteractions(konvaImg) {
+    konvaImg.on('mousedown touchstart', () => { tr.nodes([konvaImg]); tr.moveToTop(); });
+    konvaImg.on('dblclick dbltap', async () => {
+         if (await showConfirm("Bild löschen?", "Soll dieses Bild entfernt werden?")) {
+             tr.nodes([]);
+             konvaImg.destroy();
+         }
     });
 }
 
@@ -201,11 +279,18 @@ function addTextNode(x, y) {
         fontSize: 14, // <--- WIEDER AUF DEN GOLDENEN MITTELWEG 14 GESETZT
         draggable: true,
         fill: '#000',
-        width: 400, 
+        width: 400,
     });
 
     objectLayer.add(textNode);
+    wireTextEditing(textNode);
+}
 
+// Verdrahtet die "Doppelklick zum Bearbeiten"-Logik für ein Textfeld.
+// Ausgelagert (statt inline in addTextNode), damit auch beim Wiederherstellen
+// eines Autosaves erzeugte Textfelder (siehe restoreNotizen() weiter unten)
+// bearbeitbar sind.
+function wireTextEditing(textNode) {
     textNode.on('dblclick dbltap', () => {
         textNode.hide();
         const textPosition = textNode.absolutePosition();
@@ -326,4 +411,120 @@ export function getNotizenImage() {
     });
 
     return { dataUrl, imageBoxes };
+}
+
+/**
+ * Serialisiert das komplette Notizen-Whiteboard (Freihand-Linien, Textfelder,
+ * Bilder inkl. Bilddaten als Data-URL, i.d.R. komprimiert - siehe
+ * compressImageDataUrl) in ein reines, JSON-taugliches Objekt.
+ * Wird vom Autosave (autosaveManager.js) genutzt, um die Notizen regelmäßig
+ * in den localStorage zu sichern.
+ * @returns {{lines: object[], objects: object[]} | null} null, wenn das
+ * Whiteboard noch nicht initialisiert wurde oder komplett leer ist.
+ */
+export function serializeNotizen() {
+    if (!drawingLayer || !objectLayer) return null;
+
+    const lines = drawingLayer.getChildren().map(n => ({
+        points: n.points(),
+        stroke: n.stroke(),
+        strokeWidth: n.strokeWidth(),
+        globalCompositeOperation: n.globalCompositeOperation(),
+    }));
+
+    const objects = [];
+    objectLayer.getChildren().forEach(n => {
+        if (n.className === 'Transformer') return;
+        if (n.className === 'Text') {
+            objects.push({
+                type: 'text',
+                text: n.text(),
+                x: n.x(),
+                y: n.y(),
+                fontSize: n.fontSize(),
+                width: n.width(),
+                rotation: n.rotation(),
+            });
+        } else if (n.className === 'Image') {
+            const dataUrl = n.getAttr('sourceDataUrl');
+            if (!dataUrl) return; // ohne Originaldaten kann das Bild nicht wiederhergestellt werden
+            objects.push({
+                type: 'image',
+                dataUrl,
+                x: n.x(),
+                y: n.y(),
+                width: n.width(),
+                height: n.height(),
+                rotation: n.rotation(),
+            });
+        }
+    });
+
+    if (lines.length === 0 && objects.length === 0) return null;
+    return { lines, objects };
+}
+
+/**
+ * Stellt ein zuvor mit serializeNotizen() gesichertes Notizen-Whiteboard
+ * wieder her. Ersetzt den kompletten aktuellen Inhalt. initNotizen() muss
+ * vorher gelaufen sein (stage/drawingLayer/objectLayer müssen existieren).
+ */
+export function restoreNotizen(data) {
+    if (!stage || !drawingLayer || !objectLayer || !data) return;
+
+    drawingLayer.destroyChildren();
+    objectLayer.destroyChildren();
+    tr = new Konva.Transformer({ keepRatio: true, padding: 5, borderStroke: '#0b66ff' });
+    objectLayer.add(tr);
+
+    (data.lines || []).forEach(l => {
+        if (!Array.isArray(l.points)) return;
+        const line = new Konva.Line({
+            stroke: l.stroke,
+            strokeWidth: l.strokeWidth,
+            globalCompositeOperation: l.globalCompositeOperation || 'source-over',
+            lineCap: 'round',
+            lineJoin: 'round',
+            points: l.points,
+        });
+        drawingLayer.add(line);
+    });
+
+    (data.objects || []).forEach(o => {
+        if (o.type === 'text') {
+            const textNode = new Konva.Text({
+                text: o.text || '',
+                x: o.x || 0,
+                y: o.y || 0,
+                fontSize: o.fontSize || 14,
+                draggable: true,
+                fill: '#000',
+                width: o.width || 400,
+                rotation: o.rotation || 0,
+            });
+            objectLayer.add(textNode);
+            wireTextEditing(textNode);
+        } else if (o.type === 'image' && o.dataUrl) {
+            const imgObj = new Image();
+            imgObj.onload = function () {
+                const konvaImg = new Konva.Image({
+                    x: o.x || 0,
+                    y: o.y || 0,
+                    image: imgObj,
+                    draggable: true,
+                    width: o.width || imgObj.naturalWidth,
+                    height: o.height || imgObj.naturalHeight,
+                    rotation: o.rotation || 0,
+                });
+                konvaImg.setAttr('sourceDataUrl', o.dataUrl);
+                objectLayer.add(konvaImg);
+                wireImageInteractions(konvaImg);
+                objectLayer.batchDraw();
+            };
+            imgObj.src = o.dataUrl;
+        }
+    });
+
+    drawingLayer.batchDraw();
+    objectLayer.batchDraw();
 }

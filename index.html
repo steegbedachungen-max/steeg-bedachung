@@ -163,11 +163,15 @@
              
              <!-- Fenster-Button -->
              <button id="add-window-btn" style="background-color: #17a2b8; color: white; border: none;">🪟 Fenster einfügen</button>
-             
+
+             <!-- Hindernis-Button (z.B. Kamin, Lüfter, Dachfenster ohne PV) -->
+             <button id="add-obstacle-btn" style="background-color: #d35400; color: white; border: none;">🔥 Hindernis einfügen</button>
+
              <div class="toolbar-divider"></div>
              <button id="snap-toggle-btn">Snap: AN</button>
              <button id="label-toggle-btn">Beschriftung: AN</button>
              <button id="grid-toggle-btn">Grid: AN</button>
+             <button id="autodim-toggle-btn">📐 Autobemaßung: AUS</button>
              <button id="measure-btn">📏 Messen</button>
              <button id="snap-90-degree-btn" style="display: none;">90°</button>
              <div class="toolbar-divider"></div>
@@ -503,11 +507,12 @@
         </div>
     </div>
 
-    <div id="daemmung-choice-modal" class="floating-panel" style="display: none;">
+    <div id="daemmung-choice-modal" class="floating-panel" style="display: none; max-width: 380px;">
         <h4>Dämmung auswählen</h4>
-        <div id="daemmung-item-buttons"></div>
-        <div style="display: flex; justify-content: flex-end; margin-top: 15px;">
-            <button id="btn-close-daemmung-choice">Schließen</button>
+        <div id="daemmung-item-checkboxes" style="text-align: left; max-height: 320px; overflow-y: auto;"></div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 15px;">
+            <button id="btn-cancel-daemmung-choice">Abbrechen</button>
+            <button id="btn-apply-daemmung-choice" style="background-color: #28a745; color: white;">Übernehmen</button>
         </div>
     </div>
 
@@ -545,7 +550,10 @@
     </div>
 
     <input type="file" id="import-file" accept=".json" style="display:none;">
-    
+
+    <!-- Autosave: kurzer, unaufdringlicher Hinweis "zuletzt automatisch gespeichert um HH:MM" -->
+    <div id="autosave-indicator" class="autosave-indicator"></div>
+
     <script src="https://unpkg.com/konva@9.2.0/konva.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>

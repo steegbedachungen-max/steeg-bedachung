@@ -2,7 +2,8 @@
 import { stage, layer, guideLayer } from './stage.js';
 import { selectedNode, setSelectedNode, getActiveScale, getUserData, setLastPvModuleSize } from './state.js';
 import { updatePanelState } from './uiSidePanel.js';
-import { deselectActiveLabel } from './figure.js'; 
+import { deselectActiveLabel } from './figure.js';
+import { refreshAutoDimensions } from './autoDimension.js';
 
 export function highlightNode(n, on) {
     // Zerstöre nur die alte selectionBox, nicht alles
@@ -71,9 +72,10 @@ export function deleteSelectedNode() {
         selectedNode.destroy(); // Entfernt das Objekt vom Konva-Layer
         layer.batchDraw();
     }
-    
+
     // Setzt den Zustand zurück (wählt "nichts" aus und deaktiviert das UI-Panel)
-    selectNode(null); 
+    selectNode(null);
+    refreshAutoDimensions();
 }
 
 /**
@@ -114,4 +116,5 @@ export function nudgeSelectedNode(deltaX_m, deltaY_m) {
         ud.y_meter = pos.y / scale;
     }
     selectedNode.setAttr('userData', ud);
+    refreshAutoDimensions();
 }

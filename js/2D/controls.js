@@ -1,9 +1,10 @@
 /* global Konva */
 import { stage, zoomIndicator, gridLayer } from './stage.js';
 import { selectNode, deleteSelectedNode } from './selection.js';
-import { deselectActiveLabel } from './figure.js'; 
-import { isMeasuring, handleMeasurementClick } from './measurement.js'; 
+import { deselectActiveLabel } from './figure.js';
+import { isMeasuring, handleMeasurementClick } from './measurement.js';
 import { selectedNode } from './state.js';
+import { rescaleAutoDimensionsForZoom } from './autoDimension.js';
 
 const scaleBy = 1.1, minScale = 0.5, maxScale = 4;
 
@@ -32,6 +33,7 @@ export function initZoomPan() {
         gridLayer.find('.gridLine').forEach(line => {
             line.strokeWidth(newStrokeWidth);
         });
+        rescaleAutoDimensionsForZoom(newScale);
 
         stage.batchDraw();
         zoomIndicator.textContent = `Zoom: ${Math.round(newScale * 100)} %`;

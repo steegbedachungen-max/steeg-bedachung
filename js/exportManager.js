@@ -5,7 +5,7 @@ import { polygonAreaPx, approxEqual } from './utils.js';
 import { renderSkizzenList, renderMaterialPage } from './aufmassManager.js';
 import { requestRedraw } from './canvasRenderer.js';
 import { hasNotizen, getNotizenImage } from './notizenManager.js'; 
-import { stage as stage2D, gridLayer } from './2D/stage.js'; 
+import { stage as stage2D, gridLayer, layer as layer2D, guideLayer as guideLayer2D } from './2D/stage.js';
 import { pagesState, getPagesForUI, captureCurrentPage, renderActivePage } from './2D/pages.js';
 import { exportProjectDataToGoogleDriveSilent } from './importExportManager.js';
 import { uploadToGoogleDrive, isGoogleDriveConnected, connectGoogleDrive } from './googleDriveManager.js';
@@ -335,11 +335,24 @@ async function proceedWithExport(fileSuffix, options) {
         const formattedDate = now.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
 
         const drawHeader = (titleText) => {
-            pdf.setFontSize(20); 
+            // Der Titel wird links ausgerichtet (statt über die volle
+            // Seitenbreite zentriert) und die Schriftgröße bei Bedarf
+            // automatisch verkleinert, damit er nicht mit dem Firmenlogo
+            // oben rechts kollidiert - das passierte z.B. bei "2D-Planung /
+            // PV-Belegung – Seite 1" (lange Titel bei mehreren 2D-Seiten),
+            // wo der zentrierte Text bis unter das Logo reichte.
+            const logoReservedWmm = 55; // Logo (50mm breit) + Sicherheitsabstand
+            const maxTitleWidthMM = pageWmm - marginMM - logoReservedWmm - marginMM;
             pdf.setFont("helvetica", "bold");
-            pdf.text(titleText, pageWmm / 2, 22, { align: 'center' });
+            let titleFontSize = 20;
+            pdf.setFontSize(titleFontSize);
+            while (titleFontSize > 12 && pdf.getTextWidth(titleText) > maxTitleWidthMM) {
+                titleFontSize -= 1;
+                pdf.setFontSize(titleFontSize);
+            }
+            pdf.text(titleText, marginMM, 22);
 
-            pdf.setFontSize(10); 
+            pdf.setFontSize(10);
             pdf.setFont("helvetica", "normal");
             pdf.setTextColor(100);
             pdf.text(`Datum: ${formattedDate}`, pageWmm - marginMM - 5, 35, { align: 'right' });
@@ -541,18 +554,64 @@ async function proceedWithExport(fileSuffix, options) {
                 // Gitter ausblenden für sauberen Druck
                 let gridWasVisible = true;
                 if (gridLayer) {
-                    gridWasVisible = gridLayer.visible(); 
-                    gridLayer.visible(false); 
-                    stage2D.draw(); 
+                    gridWasVisible = gridLayer.visible();
+                    gridLayer.visible(false);
+                    stage2D.draw();
                 }
 
-                // 2D Stage in Bild umwandeln (Ohne Gitter)
-                const modelImgData = stage2D.toDataURL({ pixelRatio: 1.5 });
-                
+                // Damit die Fläche immer VOLLSTÄNDIG exportiert wird - unabhängig
+                // davon, wie weit der Nutzer zuletzt im Editor gezoomt/verschoben
+                // hatte (sonst wurde nur der gerade sichtbare Ausschnitt
+                // eingefangen und die Zeichnung z.T. abgeschnitten) - wird die
+                // Stage kurzzeitig auf Zoom 100% / Position (0,0) zurückgesetzt
+                // und exakt auf die Bounding-Box des tatsächlichen Inhalts
+                // (Figuren + evtl. Bemaßungen) zugeschnitten.
+                const originalStageScale = { x: stage2D.scaleX(), y: stage2D.scaleY() };
+                const originalStagePos = stage2D.position();
+                stage2D.scale({ x: 1, y: 1 });
+                stage2D.position({ x: 0, y: 0 });
+                stage2D.draw();
+
+                const figuresBox = layer2D.getClientRect();
+                const guidesBox = guideLayer2D.getClientRect();
+                const hasFigures = figuresBox.width > 0 && figuresBox.height > 0;
+                const hasGuides = guidesBox.width > 0 && guidesBox.height > 0;
+
+                let cropX, cropY, cropW, cropH;
+                if (hasFigures || hasGuides) {
+                    const left = Math.min(hasFigures ? figuresBox.x : Infinity, hasGuides ? guidesBox.x : Infinity);
+                    const top = Math.min(hasFigures ? figuresBox.y : Infinity, hasGuides ? guidesBox.y : Infinity);
+                    const right = Math.max(hasFigures ? figuresBox.x + figuresBox.width : -Infinity, hasGuides ? guidesBox.x + guidesBox.width : -Infinity);
+                    const bottom = Math.max(hasFigures ? figuresBox.y + figuresBox.height : -Infinity, hasGuides ? guidesBox.y + guidesBox.height : -Infinity);
+                    const pad = 20; // etwas Rand ringsum, damit nichts am Bildrand klebt
+                    cropX = left - pad;
+                    cropY = top - pad;
+                    cropW = (right - left) + 2 * pad;
+                    cropH = (bottom - top) + 2 * pad;
+                } else {
+                    // Fallback (sollte hier nicht vorkommen, da wir vorher schon
+                    // auf Seiten mit Inhalt gefiltert haben)
+                    cropX = 0; cropY = 0; cropW = stage2D.width(); cropH = stage2D.height();
+                }
+
+                // Auflösung an die tatsächliche Inhaltsgröße anpassen, damit die
+                // Schärfe unabhängig vom zuletzt eingestellten Zoom im Editor ist.
+                const targetPxWidth = 2200;
+                const dynamicPixelRatio = Math.min(4, Math.max(1.5, targetPxWidth / Math.max(cropW, 1)));
+
+                // 2D Stage in Bild umwandeln (Ohne Gitter, exakt auf den Inhalt zugeschnitten)
+                const modelImgData = stage2D.toDataURL({ x: cropX, y: cropY, width: cropW, height: cropH, pixelRatio: dynamicPixelRatio });
+
+                // Zoom/Position im Editor wiederherstellen, damit sich für den
+                // Nutzer durch den Export nichts sichtbar verändert.
+                stage2D.scale(originalStageScale);
+                stage2D.position(originalStagePos);
+                stage2D.draw();
+
                 // Gitter wiederherstellen
                 if (gridLayer) {
-                    gridLayer.visible(gridWasVisible); 
-                    stage2D.draw(); 
+                    gridLayer.visible(gridWasVisible);
+                    stage2D.draw();
                 }
 
                 const img2D = await new Promise((resolve) => {

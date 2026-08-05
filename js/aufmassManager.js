@@ -542,6 +542,99 @@ export function renderSkizzenList() {
 }
 
 /**
+ * Berechnet den Sandwichpaneele-Bedarf für EINE Skizze (feste Deckbreite,
+ * Paneellänge pro Traufe-Segment individuell aus der längsten direkt
+ * benachbarten Ortgang-Seite hergeleitet - siehe ausführlicher Kommentar im
+ * Aufrufer). Liefert { flaeche, groups: [{depth, count}, ...] } oder null,
+ * falls die Skizze kein aktives Traufe-Segment hat.
+ *
+ * Vorgehen:
+ *   1. Alle aktiven Traufe-Segmente in Skizzenreihenfolge sammeln, jedem die
+ *      Tiefe der längsten direkt benachbarten Ortgang (links)/(rechts)-Seite
+ *      zuweisen (Fallback: Ø Ortganglänge der ganzen Skizze, falls kein
+ *      direkter Ortgang-Nachbar vorhanden ist).
+ *   2. Diese Segmente lückenlos zu einer durchgehenden Breiten-Achse
+ *      aneinanderreihen (0 .. Gesamtbreite).
+ *   3. Die Breiten-Achse in Deckbreite-breite Paneele kacheln; ein Paneel,
+ *      das über die Grenze zwischen zwei unterschiedlich tiefen Zonen
+ *      hinwegreicht, bekommt die GRÖSSERE der beiden Tiefen zugewiesen
+ *      (Sicherheit vor Materialmangel - der Überstand wird vor Ort
+ *      zugeschnitten).
+ */
+function computeSandwichpaneeleForSketch(sk, DB_m, smartCeil) {
+    const deleted = new Set(sk.deletedSegments || []);
+    const labels = sk.labels || {};
+    const segInclusion = sk.segmentInclusion || {};
+    const n = sk.points.length - 1;
+    if (n < 1) return null;
+
+    const segLen = (idx) => {
+        const p1 = sk.points[idx], p2 = sk.points[idx + 1];
+        return Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    };
+    const isActive = (idx) => !deleted.has(idx) && segInclusion[idx] !== false;
+
+    const traufeSegments = [];
+    for (let i = 0; i < n; i++) {
+        if (!isActive(i) || labels[i] !== 'Traufe') continue;
+        const width = segLen(i);
+        if (width <= 0) continue;
+        const prevIdx = (i - 1 + n) % n;
+        const nextIdx = (i + 1) % n;
+        const neighborDepths = [];
+        [prevIdx, nextIdx].forEach(ni => {
+            if (ni === i || !isActive(ni)) return;
+            if (labels[ni] === 'Ortgang (links)' || labels[ni] === 'Ortgang (rechts)') {
+                neighborDepths.push(segLen(ni));
+            }
+        });
+        traufeSegments.push({ width, neighborDepths });
+    }
+    if (traufeSegments.length === 0) return null;
+
+    // Fallback-Tiefe für Traufe-Segmente ohne direkten Ortgang-Nachbarn:
+    // Ø Ortganglänge der ganzen Skizze (Mittelwert aus links/rechts, falls
+    // beide vorhanden).
+    let linksSum = 0, rechtsSum = 0, hasLinks = false, hasRechts = false;
+    for (let i = 0; i < n; i++) {
+        if (!isActive(i)) continue;
+        if (labels[i] === 'Ortgang (links)') { linksSum += segLen(i); hasLinks = true; }
+        if (labels[i] === 'Ortgang (rechts)') { rechtsSum += segLen(i); hasRechts = true; }
+    }
+    const fallbackDepth = (hasLinks && hasRechts) ? (linksSum + rechtsSum) / 2 : (hasLinks ? linksSum : (hasRechts ? rechtsSum : 0));
+
+    const intervals = [];
+    let cursor = 0;
+    traufeSegments.forEach(seg => {
+        const depth = seg.neighborDepths.length > 0 ? Math.max(...seg.neighborDepths) : fallbackDepth;
+        intervals.push({ start: cursor, end: cursor + seg.width, depth });
+        cursor += seg.width;
+    });
+    const totalWidth = cursor;
+    if (totalWidth <= 0) return null;
+
+    const anzahlPaneeleGesamt = Math.max(1, smartCeil(totalWidth / DB_m));
+    const groupMap = new Map();
+    let flaeche = 0;
+    for (let p = 0; p < anzahlPaneeleGesamt; p++) {
+        const pStart = p * DB_m;
+        const pEnd = Math.min(totalWidth, (p + 1) * DB_m);
+        let maxDepth = 0;
+        intervals.forEach(iv => {
+            if (iv.start < pEnd - 1e-9 && iv.end > pStart + 1e-9 && iv.depth > maxDepth) {
+                maxDepth = iv.depth;
+            }
+        });
+        flaeche += maxDepth * DB_m;
+        const key = maxDepth.toFixed(3);
+        if (!groupMap.has(key)) groupMap.set(key, { depth: maxDepth, count: 0 });
+        groupMap.get(key).count++;
+    }
+
+    return { flaeche, groups: [...groupMap.values()] };
+}
+
+/**
  * ZENTRALE FUNKTION: Berechnet und zeigt den Materialbedarf an.
  */
 function createMaterialBlock(lengthTotals, areaTotals, accessoryTotals, filter, tile, sketchesWithIdx) {
@@ -617,7 +710,47 @@ function createMaterialBlock(lengthTotals, areaTotals, accessoryTotals, filter, 
 
         let requiredQty, formulaText;
 
-        if (canUseRowCalc) {
+        if (tile.sandwichpanel) {
+            // Sandwichpaneele: feste Deckbreite (i.d.R. 1,00m), Decklänge wird
+            // NICHT als Katalog-Fixgröße geführt, sondern individuell auf die
+            // tatsächliche Ortganglänge zugeschnitten. Berechnung erfolgt PRO
+            // Traufe-Segment (siehe computeSandwichpaneeleForSketch): jedes
+            // Traufe-Segment bekommt als Paneellänge die längste direkt
+            // benachbarte Ortgang-Seite. Die einzelnen Traufe-Segmente werden
+            // (in Skizzenreihenfolge) zu einer durchgehenden Breiten-Achse
+            // aneinandergereiht und in 1m-Paneele gekachelt - ein Paneel, das
+            // über einen Übergang zwischen zwei unterschiedlich tiefen Zonen
+            // hinwegreicht, bekommt die GRÖSSERE der beiden Tiefen (Sicherheit
+            // vor Materialmangel; der Überstand wird vor Ort zugeschnitten).
+            const DB_m = tile.deckbreite_cm / 100;
+            let totalFlaeche = 0;
+            const groupTotals = new Map(); // depth.toFixed(3) -> { depth, count }
+            let anyZoneFound = false;
+
+            sketchesWithIdx.forEach(({ sk }) => {
+                const mode = sk.inclusionMode ?? (sk.includeInTotals === false ? 0 : 1);
+                if (mode === 0) return;
+                const result = computeSandwichpaneeleForSketch(sk, DB_m, smartCeil);
+                if (!result) return;
+                anyZoneFound = true;
+                totalFlaeche += result.flaeche * mode;
+                result.groups.forEach(g => {
+                    const key = g.depth.toFixed(3);
+                    if (!groupTotals.has(key)) groupTotals.set(key, { depth: g.depth, count: 0 });
+                    groupTotals.get(key).count += g.count * mode;
+                });
+            });
+
+            if (anyZoneFound && totalFlaeche > 0) {
+                requiredQty = totalFlaeche;
+                const groupList = [...groupTotals.values()].filter(g => Math.abs(g.count) > 0.001).sort((a, b) => b.depth - a.depth);
+                const groupText = groupList.map(g => `${g.count} Paneele × ${g.depth.toFixed(2)}m`).join(' + ');
+                formulaText = `${groupText} (je ${DB_m.toFixed(2)}m Deckbreite − Länge je Zone = längste benachbarte Ortgang-Seite; an Übergängen zwischen unterschiedlich tiefen Zonen wird ein Paneel entsprechend zugeschnitten)`;
+            } else {
+                requiredQty = totalAreaM2 * tile.faktor;
+                formulaText = `${totalAreaM2.toFixed(2)} m² * ${tile.faktor} ${tile.einheit}/m² (Durchschnittsfaktor - keine Beschriftung "Traufe" gefunden)`;
+            }
+        } else if (canUseRowCalc) {
             // Trauflattmaß: recherchierter Wert nutzen, falls beim Material
             // hinterlegt (z.B. bei Röben als Spanne "35,5 - 37,5"); sonst
             // feste Standardannahme von 34cm.
@@ -928,7 +1061,8 @@ function createMaterialBlock(lengthTotals, areaTotals, accessoryTotals, filter, 
         // Durchgehendes Bahnenmaterial (z.B. Stehfalz-Scharen) - kein Reihen-
         // konzept, stattdessen m² pro laufendem Meter als Bestellhilfe.
         const flaecheProLfm = (tile.deckbreite_cm / 100) * tile.faktor;
-        const parts = [`Deckbreite: ${tile.deckbreite_cm}cm${tile.bandbreite_cm !== undefined ? ` (Bandbreite: ${tile.bandbreite_cm}cm)` : ''}`, `ca. ${flaecheProLfm.toFixed(3)} m² pro lfm (Schar-Länge)`];
+        const laengenBezeichnung = tile.sandwichpanel ? 'Paneellänge' : 'Schar-Länge';
+        const parts = [`Deckbreite: ${tile.deckbreite_cm}cm${tile.bandbreite_cm !== undefined ? ` (Bandbreite: ${tile.bandbreite_cm}cm)` : ''}`, `ca. ${flaecheProLfm.toFixed(3)} m² pro lfm (${laengenBezeichnung})`];
         if (tile.randhochfuehrung_m !== undefined) {
             parts.push(`ca. ${tile.randhochfuehrung_m.toFixed(2)} m² pro lfm (Rand-/Wandanschluss)`);
         }
@@ -1036,7 +1170,8 @@ export function renderMaterialPage() {
         row.appendChild(ziegelBtn);
 
         const daemmungBtn = document.createElement('button');
-        daemmungBtn.textContent = `🧊 ${sk.daemmung ? sk.daemmung.material : 'Dämmung wählen'}`;
+        const daemmungCount = (sk.daemmungItems || []).length;
+        daemmungBtn.textContent = daemmungCount > 0 ? `🧊 Dämmung (${daemmungCount})` : '🧊 Dämmung wählen';
         daemmungBtn.onclick = () => openDaemmungChoiceModal(idx);
         row.appendChild(daemmungBtn);
 
@@ -1087,23 +1222,30 @@ export function renderMaterialPage() {
     // der "🧱 Eindeckung wählen"-Button im "Material pro Skizze"-Panel oben
     // bereits genau das Gleiche anbietet - das war doppelt.
 
-    // --- Dämmung: nach gewähltem Material gruppieren und berechnen ---
+    // --- Dämmung: pro gewähltem Item über alle Skizzen gruppieren (Mehrfachauswahl) ---
     const daemmungGroups = [];
     const daemmungIndexByName = new Map();
-    dataState.savedSketches.forEach((sk, idx) => {
-        if (!sk.daemmung) return;
-        const key = sk.daemmung.material;
-        if (!daemmungIndexByName.has(key)) {
-            daemmungIndexByName.set(key, daemmungGroups.length);
-            daemmungGroups.push({ material: sk.daemmung, sketches: [] });
-        }
-        daemmungGroups[daemmungIndexByName.get(key)].sketches.push(sk);
+    dataState.savedSketches.forEach(sk => {
+        (sk.daemmungItems || []).forEach(item => {
+            const key = item.material;
+            if (!daemmungIndexByName.has(key)) {
+                daemmungIndexByName.set(key, daemmungGroups.length);
+                daemmungGroups.push({ material: item, sketches: [] });
+            }
+            daemmungGroups[daemmungIndexByName.get(key)].sketches.push(sk);
+        });
     });
     daemmungGroups.forEach(group => {
-        const { globalTotalArea } = calculateTotalsForSketches(group.sketches);
+        const { globalTotals, globalTotalArea } = calculateTotalsForSketches(group.sketches);
         const totalArea = sumAreaContributions(globalTotalArea);
         if (totalArea > 0) {
-            renderSimpleMaterialBlock(container, 'Dämmung', group.material, totalArea, group.sketches.map(s => s.name));
+            if (group.material.deckbreite_cm !== undefined && group.material.decklaenge_cm !== undefined) {
+                const sparrenlaenge = sumOrtganglaenge(globalTotals);
+                const traufeLaenge = sumAreaContributions(globalTotals["Traufe"]);
+                renderPlattenMaterialBlock(container, group.material, totalArea, sparrenlaenge, traufeLaenge, group.sketches.map(s => s.name));
+            } else {
+                renderSimpleMaterialBlock(container, 'Dämmung', group.material, totalArea, group.sketches.map(s => s.name));
+            }
         }
     });
 
@@ -1121,9 +1263,53 @@ export function renderMaterialPage() {
         });
     });
     metallGroups.forEach(group => {
-        const { globalTotalArea } = calculateTotalsForSketches(group.sketches);
+        const { globalTotals, globalTotalArea } = calculateTotalsForSketches(group.sketches);
         const totalArea = sumAreaContributions(globalTotalArea);
-        if (totalArea > 0) {
+        if (group.material.hoehe_m !== undefined) {
+            // Scharen Zuschnitt: je nach gewählter Position (Traufe oder
+            // Ortgang, siehe scharenPosition) die passende Kantenlänge
+            // verwenden. Ältere/ohne Position gespeicherte Einträge fallen
+            // auf Ortgang zurück (bisheriges Verhalten).
+            const position = group.material.scharenPosition || 'Ortgang';
+            const laenge = getPositionLength(position, globalTotals);
+            const laengenLabel = getPositionLaengenLabel(position);
+            if (laenge > 0) {
+                renderScharenZuschnittBlock(container, group.material, laenge, group.sketches.map(s => s.name), laengenLabel);
+            } else if (totalArea > 0) {
+                renderSimpleMaterialBlock(container, 'Metall', group.material, totalArea, group.sketches.map(s => s.name));
+            }
+        } else if (group.material.positionBasis !== undefined) {
+            // Traufblech (positionswählbar): reine Länge × Faktor, aber wie
+            // bei Scharen Zuschnitt mit wählbarer Position (Traufe/Ortgang).
+            const laenge = getPositionLength(group.material.positionBasis, globalTotals);
+            if (laenge > 0) {
+                renderLabelLengthMaterialBlock(container, group.material, laenge, group.sketches.map(s => s.name), getPositionLaengenLabel(group.material.positionBasis));
+            } else if (totalArea > 0) {
+                renderSimpleMaterialBlock(container, 'Metall', group.material, totalArea, group.sketches.map(s => s.name));
+            }
+        } else if (group.material.basedOnLabel === 'Ortgang') {
+            // Ortgangblech: wie Rinne/Tropfblech automatisch über die Länge
+            // berechnet, aber "Ortgang" ist kein einzelner Beschriftungs-
+            // Schlüssel (siehe sumOrtganglaenge) - zusätzlich zählt auch die
+            // "Pult"-Beschriftung mit (Pultdach-Kante, deckungsgleich zum
+            // Ortgang bei einem Sparrendach).
+            const laenge = sumOrtganglaenge(globalTotals) + sumAreaContributions(globalTotals["Pult"]);
+            if (laenge > 0) {
+                renderLabelLengthMaterialBlock(container, group.material, laenge, group.sketches.map(s => s.name), 'Ortgang-/Pultlänge');
+            } else if (totalArea > 0) {
+                renderSimpleMaterialBlock(container, 'Metall', group.material, totalArea, group.sketches.map(s => s.name));
+            }
+        } else if (group.material.basedOnLabel !== undefined) {
+            // Rinne/Tropfblech/Traufabschluss: automatisch anhand der Länge
+            // der hinterlegten Beschriftung (i.d.R. "Traufe") berechnen,
+            // statt der reinen Flächen-Näherung.
+            const laenge = sumAreaContributions(globalTotals[group.material.basedOnLabel]);
+            if (laenge > 0) {
+                renderLabelLengthMaterialBlock(container, group.material, laenge, group.sketches.map(s => s.name));
+            } else if (totalArea > 0) {
+                renderSimpleMaterialBlock(container, 'Metall', group.material, totalArea, group.sketches.map(s => s.name));
+            }
+        } else if (totalArea > 0) {
             renderSimpleMaterialBlock(container, 'Metall', group.material, totalArea, group.sketches.map(s => s.name));
         }
     });
@@ -1169,6 +1355,35 @@ function sumAreaContributions(areaTotals) {
 }
 
 /**
+ * Ermittelt die Sparren-/Ortganglänge aus globalTotals: Mittelwert aus
+ * "Ortgang (links)" und "Ortgang (rechts)", falls beide vorhanden, sonst
+ * die jeweils vorhandene Seite. Gleiche Logik wie bei der Ziegel-Reihen-
+ * Berechnung, hier für Platten-Material (z.B. Aufsparrendämmung) wiederverwendet.
+ */
+function sumOrtganglaenge(globalTotals) {
+    const links = sumAreaContributions(globalTotals["Ortgang (links)"]);
+    const rechts = sumAreaContributions(globalTotals["Ortgang (rechts)"]);
+    if (links > 0 && rechts > 0) return (links + rechts) / 2;
+    return links > 0 ? links : rechts;
+}
+
+/**
+ * Liefert die Kantenlänge für eine wählbare Position ("Traufe" oder
+ * "Ortgang") - genutzt von Scharen Zuschnitt und dem positionswählbaren
+ * Traufblech. "Ortgang" nutzt sumOrtganglaenge() (Mittelwert links/rechts),
+ * da es in den Beschriftungen keinen einzelnen "Ortgang"-Schlüssel gibt.
+ */
+function getPositionLength(position, globalTotals) {
+    return position === 'Traufe'
+        ? sumAreaContributions(globalTotals["Traufe"])
+        : sumOrtganglaenge(globalTotals);
+}
+
+function getPositionLaengenLabel(position) {
+    return position === 'Traufe' ? 'Traufelänge' : 'Ortganglänge';
+}
+
+/**
  * Rendert einen einfachen Fläche × Faktor Material-Block (für Dämmung und
  * Metall-Positionen) - ohne die First/Grat/Ortgang-Logik der Hauptdeckung.
  */
@@ -1181,6 +1396,19 @@ function renderSimpleMaterialBlock(container, kategorieLabel, materialObj, total
     const qty = totalAreaM2 * materialObj.faktor;
     const displayQty = materialObj.einheit === 'Stk' ? smartCeil(qty) : qty.toFixed(2);
 
+    // Falls Plattenmaße hinterlegt sind (z.B. Aufsparrendämmung 1,00m ×
+    // 2,38m), zusätzlich die benötigte Stückzahl an ganzen Platten ausweisen.
+    let stueckzahlRow = '';
+    if (materialObj.deckbreite_cm !== undefined && materialObj.decklaenge_cm !== undefined) {
+        const plattenflaeche = (materialObj.deckbreite_cm / 100) * (materialObj.decklaenge_cm / 100);
+        const anzahlPlatten = smartCeil(qty / plattenflaeche);
+        stueckzahlRow = `
+        <tr>
+            <td>${materialObj.material} (Stückzahl)</td>
+            <td><strong>${anzahlPlatten} Stk</strong> <span class="formula">(${qty.toFixed(2)} m² / ${plattenflaeche.toFixed(2)} m² pro Platte [${(materialObj.deckbreite_cm/100).toFixed(2)}m × ${(materialObj.decklaenge_cm/100).toFixed(2)}m], aufgerundet)</span></td>
+        </tr>`;
+    }
+
     block.innerHTML = `
         <h3 style="margin-top:0; margin-bottom:5px;">${kategorieLabel}: ${materialObj.material}</h3>
         <div style="margin-bottom:10px; color:#666; font-size:0.9em;">Skizzen: ${sketchNames.join(', ')}</div>
@@ -1188,6 +1416,138 @@ function renderSimpleMaterialBlock(container, kategorieLabel, materialObj, total
         <tr>
             <td>${materialObj.material}</td>
             <td><strong>${displayQty} ${materialObj.einheit}</strong> <span class="formula">(${totalAreaM2.toFixed(2)} m² * ${materialObj.faktor} ${materialObj.einheit}/m²)</span></td>
+        </tr>
+        ${stueckzahlRow}
+        </tbody></table>
+    `;
+    container.appendChild(block);
+}
+
+/**
+ * Rendert einen Platten-Material-Block (z.B. Aufsparrendämmung) mit einer
+ * ECHTEN Reihen-Berechnung statt reiner Fläche/Plattenfläche-Näherung:
+ *   1. Anzahl Reihen (die Platte steht hochkant, 1,00m Richtung First)
+ *      = Sparrenlänge / Plattenbreite(hoch), aufgerundet
+ *   2. Meterbedarf in der Breite = Anzahl Reihen × Traufe-Länge (das
+ *      Reststück einer Reihe wird als Anfangsstück der nächsten Reihe
+ *      weiterverwendet - daher wird NICHT pro Reihe einzeln aufgerundet,
+ *      sondern erst am Ende in Summe)
+ *   3. Anzahl Platten = Meterbedarf in der Breite / Plattenlänge(breit),
+ *      aufgerundet (Verschnitt fällt nur einmal ganz am Ende an, z.B. an
+ *      der letzten Reihe Richtung First)
+ * Fehlen Sparrenlänge (Ortganglänge) oder Traufe-Länge (keine passende
+ * Beschriftung in der Skizze), wird auf die einfache Fläche/Plattenfläche-
+ * Näherung zurückgefallen.
+ */
+function renderPlattenMaterialBlock(container, materialObj, totalAreaM2, sparrenlaenge, traufeLaenge, sketchNames) {
+    const smartCeil = (num) => Math.ceil(num - 1e-9);
+    const block = document.createElement('div');
+    block.className = 'material-block';
+    block.style.marginBottom = '25px';
+
+    const plattenbreiteHoch = materialObj.deckbreite_cm / 100;   // z.B. 1,00m (Richtung First)
+    const plattenlaengeBreit = materialObj.decklaenge_cm / 100;  // z.B. 2,38m (Richtung Traufe)
+    const plattenflaeche = plattenbreiteHoch * plattenlaengeBreit;
+
+    let anzahlPlatten, formulaHtml;
+
+    if (sparrenlaenge > 0 && traufeLaenge > 0) {
+        const anzahlReihen = smartCeil(sparrenlaenge / plattenbreiteHoch);
+        const meterbedarfBreite = anzahlReihen * traufeLaenge;
+        anzahlPlatten = smartCeil(meterbedarfBreite / plattenlaengeBreit);
+        formulaHtml = `${anzahlReihen} Reihen [${sparrenlaenge.toFixed(2)}m Sparrenlänge / ${plattenbreiteHoch.toFixed(2)}m Plattenbreite, aufgerundet] `
+            + `× ${traufeLaenge.toFixed(2)}m Traufe = ${meterbedarfBreite.toFixed(2)}m Gesamtbreite / ${plattenlaengeBreit.toFixed(2)}m Plattenlänge, aufgerundet `
+            + `(Reststück wandert jeweils in die nächste Reihe, Verschnitt nur einmal am Ende/First)`;
+    } else {
+        // Fallback: einfache Näherung, falls Ortgang-/Traufe-Beschriftung fehlt
+        const qty = totalAreaM2 * materialObj.faktor;
+        anzahlPlatten = smartCeil(qty / plattenflaeche);
+        const missing = sparrenlaenge <= 0 ? '"Ortgang (links)"/"Ortgang (rechts)"' : '"Traufe"';
+        formulaHtml = `${qty.toFixed(2)} m² / ${plattenflaeche.toFixed(2)} m² pro Platte, aufgerundet `
+            + `(einfache Näherung - keine Beschriftung ${missing} gefunden, daher keine echte Reihen-Berechnung möglich)`;
+    }
+
+    block.innerHTML = `
+        <h3 style="margin-top:0; margin-bottom:5px;">Dämmung: ${materialObj.material}</h3>
+        <div style="margin-bottom:10px; color:#666; font-size:0.9em;">Skizzen: ${sketchNames.join(', ')}</div>
+        <table><thead><tr><th>Material / Posten</th><th>Gesamtmenge</th></tr></thead><tbody>
+        <tr>
+            <td>${materialObj.material} (Stückzahl)</td>
+            <td><strong>${anzahlPlatten} Stk</strong> <span class="formula">(${formulaHtml})</span></td>
+        </tr>
+        <tr>
+            <td>${materialObj.material} (Fläche, zur Info)</td>
+            <td>${(anzahlPlatten * plattenflaeche).toFixed(2)} m² <span class="formula">(${anzahlPlatten} Platten × ${plattenflaeche.toFixed(2)}m² pro Platte)</span></td>
+        </tr>
+        </tbody></table>
+    `;
+    container.appendChild(block);
+}
+
+// Zusätzliche Rohbreite pro Schar-Zuschnitt über die reine Deckbreite hinaus
+// (Überdeckung/Falz-Zugabe), damit die Scharen sich beim Verlegen sauber
+// überlappen lassen. Gilt für alle Deckbreiten/Decklängen gleichermaßen.
+const SCHAREN_UEBERDECKUNG_M = 0.075;
+
+/**
+ * Rendert einen Scharen-Zuschnitt-Block (z.B. "Scharen Zuschnitt Traufe 33cm
+ * (Deckbreite 42,5cm)"):
+ *   1. "Stückzahl" = Kantenlänge (Traufe ODER Ortgang, je nach gewählter
+ *      Position) ÷ Deckbreite, aufgerundet
+ *   2. "Fläche" = Stückzahl × Zuschnitt-Höhe (hoehe_m) × Rohbreite
+ *      (Deckbreite + Überdeckung), da jede Schar etwas breiter zugeschnitten
+ *      werden muss, als sie später sichtbar deckt.
+ */
+function renderScharenZuschnittBlock(container, materialObj, laenge, sketchNames, laengenLabel = 'Ortganglänge') {
+    const smartCeil = (num) => Math.ceil(num - 1e-9);
+    const block = document.createElement('div');
+    block.className = 'material-block';
+    block.style.marginBottom = '25px';
+
+    const deckbreiteM = materialObj.deckbreite_cm / 100;
+    const anzahlScharen = smartCeil(laenge / deckbreiteM);
+    const rohbreiteM = deckbreiteM + SCHAREN_UEBERDECKUNG_M;
+    const flaeche = anzahlScharen * materialObj.hoehe_m * rohbreiteM;
+
+    block.innerHTML = `
+        <h3 style="margin-top:0; margin-bottom:5px;">Metall: ${materialObj.material}</h3>
+        <div style="margin-bottom:10px; color:#666; font-size:0.9em;">Skizzen: ${sketchNames.join(', ')}</div>
+        <table><thead><tr><th>Material / Posten</th><th>Gesamtmenge</th></tr></thead><tbody>
+        <tr>
+            <td>${materialObj.material} (Stückzahl)</td>
+            <td><strong>${anzahlScharen} Stk</strong> <span class="formula">(${laenge.toFixed(2)}m ${laengenLabel} / ${deckbreiteM.toFixed(3)}m Deckbreite, aufgerundet)</span></td>
+        </tr>
+        <tr>
+            <td>${materialObj.material} (Fläche)</td>
+            <td><strong>${flaeche.toFixed(2)} m²</strong> <span class="formula">(${anzahlScharen} Stk × ${materialObj.hoehe_m.toFixed(2)}m Zuschnitt-Höhe × ${rohbreiteM.toFixed(3)}m Rohbreite [${deckbreiteM.toFixed(3)}m Deckbreite + ${SCHAREN_UEBERDECKUNG_M.toFixed(3)}m Überdeckung])</span></td>
+        </tr>
+        </tbody></table>
+    `;
+    container.appendChild(block);
+}
+
+/**
+ * Rendert einen Block für Metall-Positionen, deren Menge automatisch aus der
+ * Länge einer bestimmten Segment-Beschriftung berechnet wird (basedOnLabel,
+ * z.B. Traufblech/Rinne/Tropfblech <- "Traufe"), statt der groben Flächen-
+ * Näherung.
+ */
+function renderLabelLengthMaterialBlock(container, materialObj, laenge, sketchNames, laengenLabelOverride) {
+    const block = document.createElement('div');
+    block.className = 'material-block';
+    block.style.marginBottom = '25px';
+
+    const faktor = materialObj.traufeFaktor ?? 1;
+    const qty = laenge * faktor;
+    const laengenLabel = laengenLabelOverride || `${materialObj.basedOnLabel}-Länge`;
+
+    block.innerHTML = `
+        <h3 style="margin-top:0; margin-bottom:5px;">Metall: ${materialObj.material}</h3>
+        <div style="margin-bottom:10px; color:#666; font-size:0.9em;">Skizzen: ${sketchNames.join(', ')}</div>
+        <table><thead><tr><th>Material / Posten</th><th>Gesamtmenge</th></tr></thead><tbody>
+        <tr>
+            <td>${materialObj.material}</td>
+            <td><strong>${qty.toFixed(2)} ${materialObj.einheit}</strong> <span class="formula">(${laenge.toFixed(2)}m ${laengenLabel} × ${faktor} ${materialObj.einheit}/m)</span></td>
         </tr>
         </tbody></table>
     `;
@@ -1291,13 +1651,14 @@ export function setMaterialFilter(category) {
 const EINDECKUNGSARTEN = [
     { key: 'Ziegel/Pfanne', icon: '🧱' },
     { key: 'Bitumen/EPDM', icon: '🛢️' },
-    { key: 'Zink/Alu', icon: '⚙️' }
+    { key: 'Schareneindeckung', icon: '⚙️' },
+    { key: 'Sandwichpaneele', icon: '📐' }
 ];
 
 /**
  * Öffnet das Eindeckung-Auswahl-Modal für eine bestimmte Skizze.
  * Zeigt zunächst eine Zwischenauswahl nach Art der Eindeckung
- * (Ziegel/Pfanne, Bitumen/EPDM, Zink/Alu), danach die passenden Materialien.
+ * (Ziegel/Pfanne, Bitumen/EPDM, Schareneindeckung), danach die passenden Materialien.
  * @param {number} sketchIdx - Die Skizze, der das Material zugewiesen wird.
  */
 export function openTileChoiceModal(sketchIdx) {
@@ -1386,13 +1747,6 @@ export function cancelTileChoice() {
 }
 
 /**
- * Schließt das Dämmung-Auswahl-Modal ohne Auswahl.
- */
-export function cancelDaemmungChoice() {
-    document.getElementById('daemmung-choice-modal').style.display = 'none';
-}
-
-/**
  * Parst eine Decklänge-Angabe ("33,4 - 36,4" oder eine Einzelzahl) in
  * einen {min, max}-Bereich in cm.
  */
@@ -1452,25 +1806,45 @@ export function selectMainTile(materialName, sketchIdx) {
     renderMaterialPage(); 
 }
 
-// --- Dämmung-Auswahl (pro Skizze, Einzelauswahl) ---
+// --- Dämmung-Auswahl (pro Skizze, Mehrfachauswahl) ---
+
+let daemmungModalSketchIdx = null;
+let daemmungModalPendingSelection = new Set();
 
 /**
- * Öffnet das Dämmung-Auswahl-Modal für eine bestimmte Skizze.
+ * Öffnet das Dämmung-Auswahl-Modal (Checkboxen, Mehrfachauswahl) für eine
+ * bestimmte Skizze. Mehrere Dämmungen (z.B. Zwischensparren + Aufsparren
+ * kombiniert) können gleichzeitig gewählt werden.
  * @param {number} sketchIdx
  */
 export function openDaemmungChoiceModal(sketchIdx) {
-    const container = document.getElementById('daemmung-item-buttons');
+    daemmungModalSketchIdx = sketchIdx;
+    const sketch = dataState.savedSketches[sketchIdx];
+    const alreadySelected = new Set((sketch?.daemmungItems || []).map(m => m.material));
+    daemmungModalPendingSelection = new Set(alreadySelected);
+
+    const container = document.getElementById('daemmung-item-checkboxes');
     container.innerHTML = "";
     const daemmungOptions = getSelectableMainTiles().filter(t => t.category === 'Dämmung');
 
     daemmungOptions.forEach((mat) => {
-        const btn = document.createElement('button');
-        btn.textContent = mat.material;
-        btn.style.display = 'block';
-        btn.style.width = '100%';
-        btn.style.marginBottom = '6px';
-        btn.onclick = () => selectDaemmung(mat.material, sketchIdx);
-        container.appendChild(btn);
+        const row = document.createElement('label');
+        row.style.cssText = 'display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer;';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.checked = alreadySelected.has(mat.material);
+        cb.onchange = () => {
+            if (cb.checked) daemmungModalPendingSelection.add(mat.material);
+            else daemmungModalPendingSelection.delete(mat.material);
+        };
+        row.appendChild(cb);
+        const label = document.createElement('span');
+        const infoText = (mat.deckbreite_cm !== undefined && mat.decklaenge_cm !== undefined)
+            ? `Platte ${(mat.deckbreite_cm/100).toFixed(2)}m × ${(mat.decklaenge_cm/100).toFixed(2)}m`
+            : `${mat.faktor} ${mat.einheit}/m²`;
+        label.textContent = `${mat.material} (${infoText})`;
+        row.appendChild(label);
+        container.appendChild(row);
     });
     if (daemmungOptions.length === 0) {
         const hint = document.createElement('p');
@@ -1478,35 +1852,210 @@ export function openDaemmungChoiceModal(sketchIdx) {
         hint.textContent = 'Keine Dämmung in der Materialdatenbank hinterlegt. Unter "Materialien verwalten" mit Kategorie "Dämmung" hinzufügen.';
         container.appendChild(hint);
     }
-    if (dataState.savedSketches[sketchIdx]?.daemmung) {
-        const resetBtn = document.createElement('button');
-        resetBtn.textContent = '✖ Dämmung entfernen';
-        resetBtn.style.cssText = 'display:block; width:100%; margin-top:10px; color:#555;';
-        resetBtn.onclick = () => {
-            dataState.savedSketches[sketchIdx].daemmung = null;
-            document.getElementById('daemmung-choice-modal').style.display = 'none';
-            renderMaterialPage();
-        };
-        container.appendChild(resetBtn);
-    }
     document.getElementById('daemmung-choice-modal').style.display = 'block';
 }
 
 /**
- * Weist einer Skizze eine Dämmung zu.
+ * Übernimmt die im Dämmung-Modal angehakten Materialien für die Skizze.
  */
-export function selectDaemmung(materialName, sketchIdx) {
-    const found = getSelectableMainTiles().find(t => t.material === materialName && t.category === 'Dämmung');
-    if (!found || sketchIdx === undefined || !dataState.savedSketches[sketchIdx]) return;
-    dataState.savedSketches[sketchIdx].daemmung = JSON.parse(JSON.stringify(found));
+export function applyDaemmungChoice() {
+    if (daemmungModalSketchIdx === null || !dataState.savedSketches[daemmungModalSketchIdx]) {
+        document.getElementById('daemmung-choice-modal').style.display = 'none';
+        return;
+    }
+    const daemmungOptions = getSelectableMainTiles().filter(t => t.category === 'Dämmung');
+    const selectedItems = daemmungOptions
+        .filter(mat => daemmungModalPendingSelection.has(mat.material))
+        .map(mat => JSON.parse(JSON.stringify(mat)));
+
+    dataState.savedSketches[daemmungModalSketchIdx].daemmungItems = selectedItems;
     document.getElementById('daemmung-choice-modal').style.display = 'none';
+    daemmungModalSketchIdx = null;
     renderMaterialPage();
+}
+
+export function cancelDaemmungChoice() {
+    document.getElementById('daemmung-choice-modal').style.display = 'none';
+    daemmungModalSketchIdx = null;
 }
 
 // --- Metall-Auswahl (pro Skizze, Mehrfachauswahl) ---
 
 let metallModalSketchIdx = null;
 let metallModalPendingSelection = new Set();
+// Scharen-Zuschnitt-Positionen, die im Modal zusammengestellt wurden (siehe
+// renderScharenConfigUI). Jeder Eintrag: { position: 'Traufe'|'Ortgang',
+// deckbreite_cm, decklaenge_cm }. Traufe und Ortgang können unabhängig
+// voneinander an-/abgehakt werden und jeweils eigene (ggf. unterschiedliche)
+// Deckbreite/Decklänge-Kombinationen bekommen, da an Traufe und Ortgang oft
+// verschieden große Scharen verbaut werden.
+let metallModalScharenConfigs = [];
+
+/**
+ * Baut aus einer gewählten Position + Deckbreite/Decklänge-Kombination ein
+ * eigenständiges Material-Objekt im selben Format wie die früheren festen
+ * "Scharen Zuschnitt 0,25/0,33/0,40/0,50"-Einträge, damit die bestehende
+ * Berechnung/Anzeige (renderScharenZuschnittBlock, siehe unten) unverändert
+ * weiterfunktioniert. scharenPosition steuert, ob beim Berechnen die
+ * Traufe- oder die Ortganglänge herangezogen wird.
+ */
+function buildScharenMaterial(position, deckbreite_cm, decklaenge_cm) {
+    const deckbreiteLabel = String(deckbreite_cm).replace('.', ',');
+    return {
+        category: 'Metall',
+        material: `Scharen Zuschnitt ${position} ${decklaenge_cm}cm (Deckbreite ${deckbreiteLabel}cm)`,
+        scharenPosition: position, // 'Traufe' oder 'Ortgang'
+        hoehe_m: decklaenge_cm / 100, // Zuschnitt-Höhe/Girth = Decklänge
+        deckbreite_cm: deckbreite_cm,
+        faktor: decklaenge_cm / 100,
+        waste: 0,
+        einheit: 'm²',
+    };
+}
+
+/**
+ * Rendert die Abfrage-UI für die konfigurierbare "Scharen Zuschnitt"-Position:
+ * erst Traufe und/oder Ortgang anhaken (Mehrfachauswahl - auch beides
+ * gleichzeitig möglich), dann für JEDE angehakte Position separat Deckbreite
+ * (42,5/52,5cm) + Decklänge (25/33/40/50cm) wählen und per "+ Hinzufügen"
+ * der jeweiligen Liste hinzufügen, da an Traufe und Ortgang unterschiedlich
+ * große Scharen verbaut sein können. Die aktuell zusammengestellte Liste
+ * liegt in metallModalScharenConfigs und wird erst beim Klick auf
+ * "Übernehmen" (applyMetallChoice) tatsächlich in die Skizze übernommen.
+ */
+function renderScharenConfigUI(container, mat) {
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = 'margin-bottom:8px;';
+
+    // Oberste Ebene: EIN einfaches Kästchen zum Anklicken, optisch wie die
+    // übrigen Metall-Positionen (z.B. Tropfblech) - die Deckbreite/Decklänge-
+    // Abfrage (inkl. Traufe/Ortgang-Auswahl) klappt erst danach auf, statt
+    // von Anfang an sichtbar zu sein.
+    const topLabel = document.createElement('label');
+    topLabel.style.cssText = 'display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer;';
+    const topCb = document.createElement('input');
+    topCb.type = 'checkbox';
+    const hasAnyExisting = metallModalScharenConfigs.length > 0;
+    topCb.checked = hasAnyExisting;
+    topLabel.appendChild(topCb);
+    const topSpan = document.createElement('span');
+    topSpan.textContent = 'Scharen Traufe/Ortgang';
+    topLabel.appendChild(topSpan);
+    wrapper.appendChild(topLabel);
+
+    const detail = document.createElement('div');
+    detail.style.cssText = `display:${hasAnyExisting ? 'block' : 'none'}; margin:0 0 8px 22px; padding:10px; border:1px solid #ddd; border-radius:6px; background:#fafafa;`;
+
+    // Wird pro Position weiter unten mit deren renderChips()-Funktion befüllt,
+    // damit beim Abwählen des obersten Kästchens auch die Chip-Anzeige jeder
+    // Position zurückgesetzt wird (nicht nur die Daten in
+    // metallModalScharenConfigs).
+    const perPositionRenderChips = [];
+
+    topCb.onchange = () => {
+        detail.style.display = topCb.checked ? 'block' : 'none';
+        if (!topCb.checked) {
+            // Beim Abwählen alle bisher konfigurierten Scharen-Positionen
+            // (Traufe UND Ortgang) verwerfen.
+            metallModalScharenConfigs = [];
+            [...detail.querySelectorAll('input[type=checkbox]')].forEach(cb => { cb.checked = false; });
+            [...detail.querySelectorAll('.scharen-sub')].forEach(sub => { sub.style.display = 'none'; });
+            perPositionRenderChips.forEach(fn => fn());
+        }
+    };
+
+    const POSITIONS = [
+        { key: 'Traufe' },
+        { key: 'Ortgang' },
+    ];
+
+    POSITIONS.forEach(pos => {
+        const posWrapper = document.createElement('div');
+        posWrapper.style.cssText = 'margin-bottom:8px;';
+
+        const posLabel = document.createElement('label');
+        posLabel.style.cssText = 'display:flex; align-items:center; gap:6px; cursor:pointer; font-weight:500; margin-bottom:4px;';
+        const posCb = document.createElement('input');
+        posCb.type = 'checkbox';
+        // Es gibt pro Position höchstens EINE Größenkonfiguration (siehe
+        // updateConfig weiter unten) - existierender Eintrag (falls
+        // vorhanden) liefert auch die vorbelegten Select-Werte.
+        const existingCfg = metallModalScharenConfigs.find(c => c.position === pos.key);
+        posCb.checked = !!existingCfg;
+        posLabel.appendChild(posCb);
+        posLabel.appendChild(document.createTextNode(pos.key));
+        posWrapper.appendChild(posLabel);
+
+        const sub = document.createElement('div');
+        sub.className = 'scharen-sub';
+        sub.style.cssText = `display:${existingCfg ? 'block' : 'none'}; margin-left:22px; padding:6px 0 2px 10px; border-left:2px solid #b6d4fe;`;
+
+        const selectRow = document.createElement('div');
+        selectRow.style.cssText = 'display:flex; gap:8px; align-items:center; flex-wrap:wrap;';
+
+        const dbSelect = document.createElement('select');
+        (mat.deckbreiteOptions_cm || []).forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = String(v);
+            opt.textContent = `${String(v).replace('.', ',')} cm Deckbreite`;
+            dbSelect.appendChild(opt);
+        });
+        if (existingCfg) dbSelect.value = String(existingCfg.deckbreite_cm);
+
+        const dlSelect = document.createElement('select');
+        (mat.decklaengeOptions_cm || []).forEach(v => {
+            const opt = document.createElement('option');
+            opt.value = String(v);
+            opt.textContent = `${v} cm Decklänge`;
+            dlSelect.appendChild(opt);
+        });
+        if (existingCfg) dlSelect.value = String(existingCfg.decklaenge_cm);
+
+        selectRow.appendChild(dbSelect);
+        selectRow.appendChild(dlSelect);
+        sub.appendChild(selectRow);
+
+        // Sofort nach jeder Auswahl übernehmen - kein extra "+ Hinzufügen"
+        // Button mehr nötig. Es gibt pro Position immer genau einen Eintrag
+        // in metallModalScharenConfigs, der bei jeder Select-Änderung
+        // aktualisiert wird.
+        function updateConfig() {
+            const deckbreite_cm = parseFloat(dbSelect.value);
+            const decklaenge_cm = parseFloat(dlSelect.value);
+            metallModalScharenConfigs = metallModalScharenConfigs.filter(c => c.position !== pos.key);
+            metallModalScharenConfigs.push({ position: pos.key, deckbreite_cm, decklaenge_cm });
+        }
+        dbSelect.onchange = updateConfig;
+        dlSelect.onchange = updateConfig;
+
+        // Für den Reset-Mechanismus beim Abwählen des obersten Kästchens
+        // (perPositionRenderChips) muss weiterhin eine Funktion vorhanden
+        // sein, die die Select-Anzeige zurücksetzt.
+        function resetSelects() {
+            dbSelect.selectedIndex = 0;
+            dlSelect.selectedIndex = 0;
+        }
+        perPositionRenderChips.push(resetSelects);
+
+        posCb.onchange = () => {
+            sub.style.display = posCb.checked ? 'block' : 'none';
+            if (posCb.checked) {
+                updateConfig();
+            } else {
+                // Beim Abwählen einer Position deren Größenkonfiguration
+                // wieder entfernen.
+                metallModalScharenConfigs = metallModalScharenConfigs.filter(c => c.position !== pos.key);
+                resetSelects();
+            }
+        };
+
+        posWrapper.appendChild(sub);
+        detail.appendChild(posWrapper);
+    });
+
+    wrapper.appendChild(detail);
+    container.appendChild(wrapper);
+}
 
 /**
  * Öffnet das Metall-Auswahl-Modal (Checkboxen, Mehrfachauswahl) für eine
@@ -1516,7 +2065,36 @@ let metallModalPendingSelection = new Set();
 export function openMetallChoiceModal(sketchIdx) {
     metallModalSketchIdx = sketchIdx;
     const sketch = dataState.savedSketches[sketchIdx];
-    const alreadySelected = new Set((sketch?.metallItems || []).map(m => m.material));
+    const existingItems = sketch?.metallItems || [];
+
+    // Bereits zugewiesene Scharen-Zuschnitt-Positionen (erkennbar an hoehe_m
+    // + deckbreite_cm - egal ob früher über die festen Größen oder bereits
+    // über diese Abfrage gewählt) in die Konfigurator-Liste vorbelegen, damit
+    // sie beim erneuten Öffnen nicht verloren gehen. Einträge ohne
+    // scharenPosition (aus einer älteren Version dieser Funktion) fallen auf
+    // "Ortgang" zurück (bisheriges Verhalten).
+    // Pro Position (Traufe/Ortgang) gibt es höchstens eine Größenkonfiguration
+    // - falls durch eine ältere Version mehrere Einträge für dieselbe
+    // Position gespeichert wurden, wird nur der erste übernommen.
+    const seenScharenPositions = new Set();
+    metallModalScharenConfigs = existingItems
+        .filter(item => item.hoehe_m !== undefined && item.deckbreite_cm !== undefined)
+        .map(item => ({
+            position: item.scharenPosition || 'Ortgang',
+            deckbreite_cm: item.deckbreite_cm,
+            decklaenge_cm: Math.round(item.hoehe_m * 100),
+        }))
+        .filter(cfg => {
+            if (seenScharenPositions.has(cfg.position)) return false;
+            seenScharenPositions.add(cfg.position);
+            return true;
+        });
+
+    const alreadySelected = new Set(
+        existingItems
+            .filter(item => item.hoehe_m === undefined && item.positionBasis === undefined)
+            .map(m => m.material)
+    );
     metallModalPendingSelection = new Set(alreadySelected);
 
     const container = document.getElementById('metall-item-checkboxes');
@@ -1524,6 +2102,10 @@ export function openMetallChoiceModal(sketchIdx) {
     const metallOptions = getSelectableMainTiles().filter(t => t.category === 'Metall');
 
     metallOptions.forEach((mat) => {
+        if (mat.configurable && mat.deckbreiteOptions_cm) {
+            renderScharenConfigUI(container, mat);
+            return;
+        }
         const row = document.createElement('label');
         row.style.cssText = 'display:flex; align-items:center; gap:8px; margin-bottom:8px; cursor:pointer;';
         const cb = document.createElement('input');
@@ -1535,7 +2117,7 @@ export function openMetallChoiceModal(sketchIdx) {
         };
         row.appendChild(cb);
         const label = document.createElement('span');
-        label.textContent = `${mat.material} (${mat.faktor} ${mat.einheit}${mat.einheit === 'm' || mat.einheit === 'm²' ? '/m²' : ''})`;
+        label.textContent = mat.material;
         row.appendChild(label);
         container.appendChild(row);
     });
@@ -1549,27 +2131,37 @@ export function openMetallChoiceModal(sketchIdx) {
 }
 
 /**
- * Übernimmt die im Metall-Modal angehakten Positionen für die Skizze.
+ * Übernimmt die im Metall-Modal angehakten Positionen sowie die im
+ * Scharen-Konfigurator zusammengestellten Deckbreite/Decklänge-Positionen
+ * für die Skizze.
  */
 export function applyMetallChoice() {
     if (metallModalSketchIdx === null || !dataState.savedSketches[metallModalSketchIdx]) {
         document.getElementById('metall-choice-modal').style.display = 'none';
+        metallModalScharenConfigs = [];
         return;
     }
-    const metallOptions = getSelectableMainTiles().filter(t => t.category === 'Metall');
+    const allMetallOptions = getSelectableMainTiles().filter(t => t.category === 'Metall');
+    const metallOptions = allMetallOptions.filter(t => !t.configurable);
     const selectedMaterials = metallOptions
         .filter(mat => metallModalPendingSelection.has(mat.material))
         .map(mat => JSON.parse(JSON.stringify(mat)));
 
+    metallModalScharenConfigs.forEach(cfg => {
+        selectedMaterials.push(buildScharenMaterial(cfg.position, cfg.deckbreite_cm, cfg.decklaenge_cm));
+    });
+
     dataState.savedSketches[metallModalSketchIdx].metallItems = selectedMaterials;
     document.getElementById('metall-choice-modal').style.display = 'none';
     metallModalSketchIdx = null;
+    metallModalScharenConfigs = [];
     renderMaterialPage();
 }
 
 export function cancelMetallChoice() {
     document.getElementById('metall-choice-modal').style.display = 'none';
     metallModalSketchIdx = null;
+    metallModalScharenConfigs = [];
 }
 
 // --- Bitumen/EPDM-Lagen-Auswahl (pro Skizze, Mehrfachauswahl) ---

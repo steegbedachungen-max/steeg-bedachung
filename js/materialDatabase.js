@@ -74,21 +74,7 @@ export const selectableMainTiles = [
             "Ortgang (rechts)": { category: "Ziegel", material: "Ortgang (BAG Rheinland, rechts)", faktor: 3, einheit: "Stk" }
         }
     },
-    { 
-        category: "Metall", 
-        material: "Metall Scharen",
-        faktor: 1.8,   // lfm/m²
-        waste: 0.10,
-        einheit: "lfm",
-        relatedFactors: {
-            // Metall hat keine Ziegel, daher leere Regeln oder Metall-Zubehör
-            "First": { category: "Metall", material: "Firstblech (Metall)", faktor: 1, einheit: "m" },
-            "Grat": { category: "Metall", material: "Gratblech (Metall)", faktor: 1, einheit: "m" },
-            "Ortgang (links)": { category: "Metall", material: "Ortgangblech (Metall)", faktor: 1, einheit: "m" },
-            "Ortgang (rechts)": { category: "Metall", material: "Ortgangblech (Metall)", faktor: 1, einheit: "m" }
-        }
-    },
-    { 
+    {
         category: "Sonstiges", 
         material: "Alternative",
         faktor: 0, // Wird abgefragt
@@ -108,8 +94,24 @@ export const selectableMainTiles = [
     // ==========================================================
     {
         category: "Dämmung",
-        material: "Aufsparrendämmung 160mm",
-        faktor: 1.03, // m²/m² (inkl. Verschnitt)
+        material: "Aufsparrendämmung",
+        faktor: 1.1, // m²/m² (inkl. ca. 10% Verschnitt für Zuschnitt an Rändern/Durchdringungen)
+        deckbreite_cm: 100, // Plattenbreite
+        decklaenge_cm: 238, // Plattenlänge (Standardformat 1,00m × 2,38m)
+        waste: 0.1,
+        einheit: "m²"
+    },
+    {
+        category: "Dämmung",
+        material: "Zwischensparrendämmung",
+        // m²/m² - Die Dämmung liegt NUR im Gefach zwischen den Sparren, nicht
+        // über dem Sparren selbst (Klemmfilz wird laut Isover mit 0,5-1cm
+        // Übermaß auf den Sparrenabstand zugeschnitten und geklemmt). Bei
+        // angenommenen 8cm Sparrenbreite und 60cm Sparrenabstand (Nutzerangabe):
+        // Faktor = (60cm - 8cm) / 60cm = 0,867. Braucht also WENIGER Material
+        // als die reine Dachfläche, nicht mehr! Bitte bei abweichender
+        // Sparrenbreite/-abstand über "Materialien verwalten" anpassen.
+        faktor: 0.867,
         waste: 0,
         einheit: "m²"
     },
@@ -123,31 +125,86 @@ export const selectableMainTiles = [
 
     // ==========================================================
     // Metall-Positionen – mehrfach auswählbar pro Skizze (neu)
-    // Faktor bezieht sich auf die Dachfläche der Skizze (m²), außer wo
-    // durch die bereits automatische Beschriftungs-Zuordnung anders
-    // sinnvoll (Traufe/Kehle/Wandanschluss laufen weiterhin zusätzlich
-    // automatisch über die Segment-Beschriftung).
+    // Traufblech/Rinne/Tropfblech werden automatisch über die Länge der
+    // "Traufe"-Beschriftung berechnet (basedOnLabel + traufeFaktor, 1:1 zur
+    // Traufe-Länge - dieselbe Zuordnung wie beim automatischen Tropfblech/
+    // Kehlblech/Wandanschlussblech der Hauptdeckung). "faktor" bleibt als
+    // Fallback erhalten (grobe Fläche/m²-Näherung), falls eine Skizze keine
+    // "Traufe"-Beschriftung hat.
     // ==========================================================
     {
+        // Traufblech: einfaches Kästchen (wie Rinne/Tropfblech) - keine
+        // Traufe/Ortgang-Auswahl mehr, Menge wird immer über die
+        // "Traufe"-Beschriftung berechnet.
         category: "Metall",
         material: "Traufblech",
-        faktor: 0.1, // lfm/m² - grobe Näherung, bitte pro Projekt prüfen; alternativ Traufe-Beschriftung nutzen
+        basedOnLabel: "Traufe",
+        traufeFaktor: 0.2, // m² Traufblech pro lfm Traufe
+        faktor: 0.1, // Fallback: m²/m² Dachfläche, falls keine "Traufe"-Beschriftung vorhanden ist
+        waste: 0.05,
+        einheit: "m²"
+    },
+    {
+        // Vorher zwei getrennte Positionen ("Rinne (Kunststoff)"/"Rinne
+        // (Metall)") - auf Wunsch zu einer einzigen, einfachen Position
+        // zusammengefasst (ein Kästchen wie bei Traufblech/Tropfblech).
+        category: "Metall",
+        material: "Rinne",
+        basedOnLabel: "Traufe",
+        traufeFaktor: 1,
+        faktor: 0.1,
         waste: 0.05,
         einheit: "m"
     },
     {
         category: "Metall",
-        material: "Rinne (Kunststoff)",
-        faktor: 0.1, // lfm/m² - grobe Näherung, bitte pro Projekt prüfen
+        material: "Tropfblech",
+        basedOnLabel: "Traufe",
+        traufeFaktor: 0.1, // m² Tropfblech pro lfm Traufe
+        faktor: 0.1,
         waste: 0.05,
-        einheit: "m"
+        einheit: "m²"
     },
     {
+        // Traufabschluss: einfaches Kästchen, Menge = Traufe-Länge x 0,25m
+        // Zuschnittbreite (analog Rinne/Tropfblech/Traufblech).
         category: "Metall",
-        material: "Rinne (Metall)",
-        faktor: 0.1, // lfm/m² - grobe Näherung, bitte pro Projekt prüfen
+        material: "Traufabschluss",
+        basedOnLabel: "Traufe",
+        traufeFaktor: 0.25, // m² Traufabschluss pro lfm Traufe (Zuschnitt 0,25m)
+        faktor: 0.1,
         waste: 0.05,
-        einheit: "m"
+        einheit: "m²"
+    },
+    {
+        // Ortgangblech: einfaches Kästchen, Menge = (Ortgang links+rechts
+        // gemittelt + "Pult"-Beschriftung) x 0,25m Zuschnittbreite.
+        // basedOnLabel: "Ortgang" ist ein Sonderwert (kein direkter
+        // globalTotals-Schlüssel) - siehe Dispatch in aufmassManager.js
+        // (renderMaterialPage / metallGroups.forEach), der zusätzlich zur
+        // Ortgang-Länge auch die "Pult"-Beschriftung mitzählt (Pultdach-
+        // Kante, deckungsgleich zum Ortgang bei einem Sparrendach).
+        category: "Metall",
+        material: "Ortgangblech",
+        basedOnLabel: "Ortgang",
+        traufeFaktor: 0.25, // m² Ortgangblech pro lfm Ortgang/Pult (Zuschnitt 0,25m)
+        faktor: 0.1,
+        waste: 0.05,
+        einheit: "m²"
+    },
+    {
+        // Scharen Zuschnitt: statt fixer Zuschnittgrößen wird beim Anhaken
+        // im Metall-Auswahl-Modal per Abfrage Deckbreite (42,5cm oder
+        // 52,5cm) und Decklänge (25/33/40/50cm) abgefragt und daraus die
+        // Position berechnet (siehe openMetallChoiceModal() in
+        // aufmassManager.js). "configurable" markiert diesen Eintrag als
+        // reinen Auswahl-Auslöser, nicht als direkt zuweisbares Material.
+        category: "Metall",
+        material: "Scharen Zuschnitt",
+        configurable: true,
+        deckbreiteOptions_cm: [42.5, 52.5],
+        decklaengeOptions_cm: [25, 33, 40, 50],
+        einheit: "m²"
     },
 
     // ==========================================================
@@ -200,32 +257,53 @@ export const selectableMainTiles = [
     },
 
     // ==========================================================
-    // Zink/Alu – Stehfalzdeckung (Einzelauswahl, wie Ziegel/Pfanne)
-    // Herleitung: Deckbreite/Nutzbreite bei Standard-Stehfalzprofilen ca.
-    // 524mm/484mm = Faktor ca. 1,08 (Materialverbrauch durch den Falz selbst,
-    // längs i.d.R. kein Verschnitt-Mehrbedarf, quer nur bei Bahnen > 7m).
+    // Schareneindeckung – flächige Eindeckung mit Metall-Scharen (ersetzt
+    // Zink/Alu-Stehfalz). Deckbreite wählbar: 42,5cm oder 52,5cm - dieselben
+    // Größen wie bei den einzelnen Scharen-Zuschnitten in den
+    // Metall-Positionen. Bandbreite (Rohblech-Breite vor dem Zuschnitt) =
+    // Deckbreite + 7,5cm Überdeckung (gleiche Zugabe wie dort).
     // Rand-/Wandanschluss separat wie bei Bitumen/EPDM berechnet.
     // ==========================================================
     {
         category: "Ziegel",
-        eindeckungsart: "Zink/Alu",
-        material: "Zinkblech (Stehfalz)",
-        faktor: 1.176, // m²/m² - Nutzerangabe: Bandbreite 500mm / Deckbreite (Sichtfläche) 425mm = 1,176 (Materialverbrauch durch beidseitige Kantung/Stehfalz)
-        deckbreite_cm: 42.5, // Deckbreite = sichtbare Fläche pro Schar nach dem Falzen
-        bandbreite_cm: 50, // Bandbreite = Rohblech-Breite vor dem Falzen
+        eindeckungsart: "Schareneindeckung",
+        material: "Schareneindeckung (Deckbreite 42,5cm)",
+        faktor: 1.176, // m²/m² - Bandbreite 50cm / Deckbreite 42,5cm
+        deckbreite_cm: 42.5,
+        bandbreite_cm: 50,
         randhochfuehrung_m: 0.2, // Hochführungshöhe an Wänden/Attika in m
         waste: 0.176,
         einheit: "m²"
     },
     {
         category: "Ziegel",
-        eindeckungsart: "Zink/Alu",
-        material: "Alublech/Aluzink (Stehfalz)",
-        faktor: 1.176, // m²/m² - Bandbreite 500mm / Deckbreite 425mm = 1,176 (gleiches Format wie Zinkblech)
-        deckbreite_cm: 42.5, // Deckbreite = sichtbare Fläche pro Schar nach dem Falzen
-        bandbreite_cm: 50, // Bandbreite = Rohblech-Breite vor dem Falzen
+        eindeckungsart: "Schareneindeckung",
+        material: "Schareneindeckung (Deckbreite 52,5cm)",
+        faktor: 1.143, // m²/m² - Bandbreite 60cm / Deckbreite 52,5cm
+        deckbreite_cm: 52.5,
+        bandbreite_cm: 60,
         randhochfuehrung_m: 0.2, // Hochführungshöhe an Wänden/Attika in m
-        waste: 0.176,
+        waste: 0.143,
+        einheit: "m²"
+    },
+
+    // ==========================================================
+    // Sandwichpaneele – Deckbreite fest 1,00m, Decklänge wird NICHT als feste
+    // Katalog-Größe geführt, sondern individuell auf die tatsächliche
+    // Ortganglänge (Dachlänge Traufe->First) zugeschnitten (siehe
+    // "sandwichpanel"-Sonderberechnung in aufmassManager.js). Bei
+    // unterschiedlich langer Traufe/First (z.B. Trapez-/Walmdach) wird die
+    // Paneelanzahl nach der breiteren der beiden Kanten bemessen, damit auf
+    // der schmaleren Seite ein Paneel passend zugeschnitten werden kann.
+    // ==========================================================
+    {
+        category: "Ziegel",
+        eindeckungsart: "Sandwichpaneele",
+        material: "Sandwichpaneele",
+        sandwichpanel: true,
+        deckbreite_cm: 100,
+        faktor: 1.08, // Fallback: m²/m² Dachfläche, falls weder Traufe/First noch Ortgang-Beschriftung vorhanden ist
+        waste: 0.08,
         einheit: "m²"
     }
 ];
@@ -237,9 +315,11 @@ export const selectableMainTiles = [
  */
 export const labelBasedMaterials = {
     // --- Längen-basierte Materialien ---
-    "Traufe": [
-        { category: "Metall", material: "Tropfblech (Zuschnitt 25)", faktor: 1, einheit: "m" }
-    ],
+    // "Traufe" -> Tropfblech wird NICHT mehr automatisch bei jeder Ziegel-
+    // Hauptdeckung mitgezählt, da Tropfblech (wie Rinne/Traufblech) bereits
+    // separat und bewusst über "Metall wählen" (Metall-Positionen) pro
+    // Skizze ausgewählt werden kann - eine automatische Zusatzposition würde
+    // sich sonst mit der manuellen Auswahl doppeln.
     "Kehle": [
         { category: "Metall", material: "Kehlblech (Zuschnitt 50)", faktor: 1, einheit: "m" }
     ],
@@ -249,7 +329,7 @@ export const labelBasedMaterials = {
     
     // --- Flächen-Materialien, die *ZUSÄTZLICH* zur Hauptdeckung anfallen ---
     "Zusatzflaeche_Dämmung": [
-         { category: "Dämmung", material: "Aufsparrendämmung 160mm", faktor: 1.03, einheit: "m²" }
+         { category: "Dämmung", material: "Aufsparrendämmung", faktor: 1.03, einheit: "m²" }
     ],
     "Zusatzflaeche_Unterspannbahn": [
          { category: "Dämmung", material: "Unterspannbahn (inkl. 5% Verschnitt)", faktor: 1.05, einheit: "m²" }

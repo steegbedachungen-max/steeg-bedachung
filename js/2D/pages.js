@@ -4,6 +4,7 @@ import { layer, guideLayer, stage } from './stage.js';
 import { erstelleFigur } from './figure.js';
 import { selectNode } from './selection.js';
 import { getUserData } from './state.js';
+import { refreshAutoDimensions } from './autoDimension.js';
 
 // ==========================================
 // Pages state
@@ -195,6 +196,11 @@ export function renderActivePage() {
 
     layer.batchDraw();
     guideLayer.batchDraw();
+
+    // Autobemaßung (Abstand zu Dachkante/Nachbarobjekt) für die neu
+    // gerenderte Seite neu berechnen - u.a. wichtig für den PDF-Export,
+    // der renderActivePage() je Seite aufruft, bevor er sie als Bild einfängt.
+    refreshAutoDimensions();
 }
 
 // ==========================================

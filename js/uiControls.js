@@ -14,6 +14,7 @@ import {
     applyEindeckungLayersChoice,
     cancelEindeckungLayersChoice,
     cancelTileChoice,
+    applyDaemmungChoice,
     cancelDaemmungChoice
 } from './aufmassManager.js';
 
@@ -454,7 +455,8 @@ export function setupUIListeners() {
     document.getElementById('btn-apply-eindeckung-layers')?.addEventListener('click', applyEindeckungLayersChoice);
     document.getElementById('btn-cancel-eindeckung-layers')?.addEventListener('click', cancelEindeckungLayersChoice);
     document.getElementById('btn-close-tile-choice')?.addEventListener('click', cancelTileChoice);
-    document.getElementById('btn-close-daemmung-choice')?.addEventListener('click', cancelDaemmungChoice);
+    document.getElementById('btn-apply-daemmung-choice')?.addEventListener('click', applyDaemmungChoice);
+    document.getElementById('btn-cancel-daemmung-choice')?.addEventListener('click', cancelDaemmungChoice);
     document.getElementById('mat-filter-ziegel')?.addEventListener('click', () => setMaterialFilter('Ziegel'));
     document.getElementById('mat-filter-dämmung')?.addEventListener('click', () => setMaterialFilter('Dämmung'));
     document.getElementById('mat-filter-metall')?.addEventListener('click', () => setMaterialFilter('Metall'));

@@ -1,7 +1,8 @@
 /* global Konva */
 import { stage, layer } from './stage.js';
 import { labelsVisible, BASE_FONT_SIZE_EDGE, BASE_FONT_SIZE_MAIN, getActiveScale } from './state.js';
-import { isMeasuring, handleMeasurementClick } from './measurement.js'; 
+import { isMeasuring, handleMeasurementClick } from './measurement.js';
+import { refreshAutoDimensions } from './autoDimension.js';
 
 let selectedLabel = null;
 const DEFAULT_FILL = '#222';
@@ -158,6 +159,7 @@ function updateDataOnDragEnd(e) {
         ud.y_meter = pos.y / scale;
     }
     node.setAttr('userData', ud);
+    refreshAutoDimensions();
 }
 
 export function addPVModule(moduleName = "PV", pvWidthM = 1.13, pvHeightM = 1.72, cascadeOffset = 0) {
@@ -189,6 +191,7 @@ export function addPVModule(moduleName = "PV", pvWidthM = 1.13, pvHeightM = 1.72
     
     erstelleFigur(newPVData, onSelectNodeCallback);
     layer.batchDraw();
+    refreshAutoDimensions();
 }
 
 export function addWindow(windowName, windowWidthM, windowHeightM) {
@@ -215,6 +218,41 @@ export function addWindow(windowName, windowWidthM, windowHeightM) {
     
     erstelleFigur(newWindowData, onSelectNodeCallback);
     layer.batchDraw();
+    refreshAutoDimensions();
+}
+
+/**
+ * Fügt ein generisches "Hindernis" ein (z.B. Kamin, Lüfter, Antenne oder
+ * Sonstiges) - technisch ein einfaches Rechteck wie ein Fenster, aber mit
+ * freiem Namen/Größe und einer eigenen Warnfarbe, damit es sich optisch von
+ * PV-Modulen/Fenstern abhebt. Zählt für die Autobemaßung wie jedes andere
+ * Objekt (Abstand zur Dachkante + zum nächsten Nachbarobjekt).
+ */
+export function addObstacle(name, widthM, heightM) {
+    if (!onSelectNodeCallback) return;
+    const scale = getActiveScale();
+
+    const viewRect = stage.container().getBoundingClientRect();
+    const viewCenter = {
+        x: (viewRect.width / 2 - stage.x()) / stage.scaleX(),
+        y: (viewRect.height / 2 - stage.y()) / stage.scaleY()
+    };
+
+    const newObstacleData = {
+        typ: "rechteck",
+        name: name || "Hindernis",
+        x_meter: (viewCenter.x / scale) - (widthM / 2),
+        y_meter: (viewCenter.y / scale) - (heightM / 2),
+        width_meter: widthM,
+        height_meter: heightM,
+        fill: "#f5cba7",
+        stroke: "#d35400",
+        locked: false
+    };
+
+    erstelleFigur(newObstacleData, onSelectNodeCallback);
+    layer.batchDraw();
+    refreshAutoDimensions();
 }
 
 export function initFigureModule(onSelect) {
@@ -377,13 +415,19 @@ export function erstelleFigur(el, onSelectNode) {
     }
     if (!f) return;
 
-    f.on("mousedown", (e) => {
+    // WICHTIG: zusätzlich zu "mousedown" auch "touchstart" abonnieren, da
+    // Konva Touch-Events auf iPad/Tablets NICHT als "mousedown" meldet.
+    // Ohne dies lässt sich ein Objekt per Finger-Tipp nicht auswählen, und
+    // damit auch das Rotations-Panel (das nur bei ausgewähltem Objekt aktiv
+    // ist) nicht bedienen - das war die Ursache dafür, dass sich PV-Module
+    // auf dem iPad nicht drehen ließen.
+    f.on("mousedown touchstart", (e) => {
         if (isMeasuring()) {
             handleMeasurementClick(e);
-            e.cancelBubble = true; 
+            e.cancelBubble = true;
             return;
         }
-        
+
         deselectActiveLabel();
         onSelectNode(f);
     });

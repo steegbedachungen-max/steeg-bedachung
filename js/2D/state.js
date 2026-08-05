@@ -58,6 +58,12 @@ export function setGridVisible(value) {
     gridVisible = value;
 }
 
+// --- Autobemaßung (automatische Abstandsanzeige zu Dachkante/Nachbarobjekt) ---
+export let autoDimensionVisible = false;
+export function setAutoDimensionVisible(value) {
+    autoDimensionVisible = value;
+}
+
 // --- Konstanten / Utilities ---
 
 // Fester Fang-Radius in SCREEN-PIXELN (unabhaengig von Zoom und Massstab).
@@ -92,4 +98,4 @@ export const BASE_FONT_SIZE_EDGE = 16;
 export const BASE_FONT_SIZE_MAIN = 20;
 
 // Hilfsfunktion um UserData robust zu lesen
-export const getUserData = (n) => n?.getAttr("userData") || null;
+export const getUserData = (n) => n?.getAttr("userData") || null; null;

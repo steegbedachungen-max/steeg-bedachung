@@ -5,6 +5,7 @@ let onDataChangedCallback = null;
 
 import { selectableMainTiles as defaultMaterials, labelBasedMaterials } from './materialDatabase.js';
 import { knownMaterialSuggestions, findMaterialSuggestion } from './materialSuggestions.js';
+import { dataState } from './state.js';
 
 const STORAGE_KEY = 'customMaterialDatabase';
 
@@ -43,7 +44,7 @@ function loadMaterials() {
  */
 function migrateMissingTechnicalFields() {
     let migrated = false;
-    const TECH_FIELDS = ['deckbreite_cm', 'decklaenge_cm', 'firstlattmass_cm', 'randhochfuehrung_m', 'bandbreite_cm'];
+    const TECH_FIELDS = ['deckbreite_cm', 'decklaenge_cm', 'firstlattmass_cm', 'randhochfuehrung_m', 'bandbreite_cm', 'hoehe_m', 'basedOnLabel', 'traufeFaktor', 'configurable', 'deckbreiteOptions_cm', 'decklaengeOptions_cm', 'sandwichpanel'];
 
     currentMaterials.forEach(mat => {
         const defaultMatch = defaultMaterials.find(d => d.material === mat.material);
@@ -69,12 +70,96 @@ function migrateMissingTechnicalFields() {
     });
 
     if (applyKnownCorrections()) migrated = true;
+    if (renameKnownMaterials()) migrated = true;
+    if (removeDeprecatedMaterials()) migrated = true;
     if (addMissingNewDefaultMaterials()) migrated = true;
+    if (revertTraufblechToSimpleCheckbox()) migrated = true;
 
     if (migrated) {
         saveMaterials();
         console.log('Materialdatenbank: Fehlende/veraltete technische Angaben automatisch aus den Code-Standardwerten nachgetragen.');
     }
+}
+
+/**
+ * Benennt bewusst umbenannte Materialien um (z.B. "Aufsparrendämmung 160mm"
+ * -> "Aufsparrendämmung", da die Dicke projektabhängig ist und nicht im
+ * Namen feststehen sollte). Aktualisiert sowohl die zentrale Materialliste
+ * als auch bereits einer Skizze zugewiesene Kopien (daemmungItems,
+ * metallItems, eindeckungLayers, material), da diese beim Zuweisen als
+ * eigenständige Kopie gespeichert werden und sonst nicht mitziehen.
+ */
+function renameKnownMaterials() {
+    let renamed = false;
+    const RENAMES = [
+        // { oldName, newName, newFaktor (optional, falls sich auch der Faktor ändert) }
+        { oldName: 'Aufsparrendämmung 160mm', newName: 'Aufsparrendämmung' },
+        { oldName: 'Zwischensparrendämmung 200mm', newName: 'Zwischensparrendämmung', newFaktor: 0.867 },
+    ];
+
+    const applyRename = (obj) => {
+        RENAMES.forEach(({ oldName, newName, newFaktor }) => {
+            if (obj.material === oldName) {
+                obj.material = newName;
+                if (newFaktor !== undefined) obj.faktor = newFaktor;
+                renamed = true;
+            }
+        });
+    };
+
+    currentMaterials.forEach(applyRename);
+    dataState.savedSketches.forEach(sk => {
+        if (sk.material) applyRename(sk.material);
+        (sk.daemmungItems || []).forEach(applyRename);
+        (sk.metallItems || []).forEach(applyRename);
+        (sk.eindeckungLayers || []).forEach(applyRename);
+    });
+
+    if (renamed) {
+        console.log('Materialdatenbank: Materialnamen automatisch aktualisiert (z.B. Dicken-Angabe aus Namen entfernt).');
+    }
+    return renamed;
+}
+
+/**
+ * Entfernt gezielt namentlich gelistete Materialien, die bewusst aus der
+ * Materialdatenbank entfernt wurden (z.B. weil nicht mehr benötigt oder
+ * durch eine neue, flexiblere Lösung ersetzt). Wirkt nur auf die zentrale
+ * Materialliste - bereits einer Skizze zugewiesene Kopien (metallItems etc.)
+ * bleiben unangetastet, da diese beim Zuweisen als eigenständige, von der
+ * Materialdatenbank losgelöste Kopie gespeichert werden und weiterhin
+ * korrekt berechnet werden sollen.
+ */
+function removeDeprecatedMaterials() {
+    let removed = false;
+    const DEPRECATED_MATERIALNAMEN = [
+        // "Metall Scharen" (1,8 lfm/m² Pauschalfaktor) wurde ersatzlos entfernt.
+        'Metall Scharen',
+        // Die 4 festen Scharen-Zuschnitt-Größen wurden durch eine Abfrage
+        // (Deckbreite 42,5/52,5cm × Decklänge 25/33/40/50cm) ersetzt, siehe
+        // "Scharen Zuschnitt" (configurable: true) in materialDatabase.js.
+        'Scharen Zuschnitt 0,25',
+        'Scharen Zuschnitt 0,33',
+        'Scharen Zuschnitt 0,40',
+        'Scharen Zuschnitt 0,50',
+        // "Rinne (Kunststoff)"/"Rinne (Metall)" wurden zu einer einzigen
+        // Position "Rinne" zusammengefasst (ein Kästchen statt zwei).
+        'Rinne (Kunststoff)',
+        'Rinne (Metall)',
+        // Die Eindeckungsart "Zink/Alu" (Stehfalz) wurde durch
+        // "Schareneindeckung" (Deckbreite 42,5cm/52,5cm wählbar) ersetzt.
+        'Zinkblech (Stehfalz)',
+        'Alublech/Aluzink (Stehfalz)',
+    ];
+
+    const before = currentMaterials.length;
+    currentMaterials = currentMaterials.filter(m => !DEPRECATED_MATERIALNAMEN.includes(m.material));
+    if (currentMaterials.length !== before) removed = true;
+
+    if (removed) {
+        console.log('Materialdatenbank: Veraltete/entfernte Standard-Materialien automatisch aus der lokalen Datenbank entfernt.');
+    }
+    return removed;
 }
 
 /**
@@ -92,8 +177,17 @@ function addMissingNewDefaultMaterials() {
         '1. Lage Bitumenbahn',
         '2. Lage Bitumenbahn',
         'EPDM-Dachbahn',
-        'Zinkblech (Stehfalz)',
-        'Alublech/Aluzink (Stehfalz)'
+        'Zwischensparrendämmung',
+        'Aufsparrendämmung',
+        'Scharen Zuschnitt', // configurable - siehe materialDatabase.js
+        'Tropfblech', // basedOnLabel: "Traufe" - siehe materialDatabase.js
+        'Rinne', // ersetzt "Rinne (Kunststoff)"/"Rinne (Metall)" - siehe materialDatabase.js
+        'Traufblech', // basedOnLabel: "Traufe" - fehlte bei manchen gespeicherten Materiallisten komplett
+        'Schareneindeckung (Deckbreite 42,5cm)', // ersetzt "Zinkblech (Stehfalz)"/"Alublech/Aluzink (Stehfalz)" - siehe materialDatabase.js
+        'Schareneindeckung (Deckbreite 52,5cm)',
+        'Sandwichpaneele', // sandwichpanel: true - siehe materialDatabase.js
+        'Traufabschluss', // basedOnLabel: "Traufe" - neu (Zuschnitt 0,25m)
+        'Ortgangblech', // basedOnLabel: "Ortgang" - neu (Zuschnitt 0,25m, zaehlt auch "Pult" mit)
     ];
 
     NEU_HINZUGEFUEGTE_MATERIALNAMEN.forEach(name => {
@@ -109,6 +203,30 @@ function addMissingNewDefaultMaterials() {
         console.log('Materialdatenbank: Neue Standard-Materialien (z.B. Bitumen/EPDM-Lagen) automatisch ergänzt.');
     }
     return added;
+}
+
+/**
+ * Traufblech war zwischenzeitlich als "configurable" (Traufe/Ortgang-
+ * Positionsauswahl im Metall-Modal, wie bei Scharen Zuschnitt) angelegt -
+ * auf Wunsch wieder auf ein einfaches Kästchen wie Rinne/Tropfblech
+ * zurückgestellt. Bereits gespeicherte "configurable"-Einträge werden daher
+ * automatisch auf das jetzige, einfache basedOnLabel-Format zurückgesetzt.
+ * Bereits einer Skizze zugewiesene "Traufblech Traufe"/"Traufblech Ortgang"-
+ * Einträge (positionBasis) bleiben als eigenständige Kopie unangetastet und
+ * werden weiterhin korrekt berechnet/angezeigt.
+ */
+function revertTraufblechToSimpleCheckbox() {
+    let changed = false;
+    const mat = currentMaterials.find(m => m.material === 'Traufblech');
+    if (mat && mat.configurable) {
+        delete mat.configurable;
+        if (mat.basedOnLabel === undefined) mat.basedOnLabel = 'Traufe';
+        changed = true;
+    }
+    if (changed) {
+        console.log('Materialdatenbank: "Traufblech" automatisch auf einfaches Kästchen (ohne Positionsauswahl) zurückgesetzt.');
+    }
+    return changed;
 }
 
 /**
@@ -135,9 +253,19 @@ function applyKnownCorrections() {
         { material: '2. Lage Bitumenbahn', path: ['faktor'], oldValue: 1.24, newValue: 1.105 },
         { material: 'EPDM-Dachbahn', path: ['faktor'], oldValue: 1.15, newValue: 1.08 },
         { material: 'EPDM-Dachbahn', path: ['faktor'], oldValue: 1.2, newValue: 1.08 },
+        // Aufsparrendämmung: jetzt mit Plattenmaß (1,00m × 2,38m) für Stückzahl-Berechnung
+        { material: 'Aufsparrendämmung 160mm', path: ['faktor'], oldValue: 1.03, newValue: 1.1 },
         // Nutzerangabe: Bandbreite 500mm / Deckbreite 425mm bei Zinkblech-Scharen
         { material: 'Zinkblech (Stehfalz)', path: ['faktor'], oldValue: 1.08, newValue: 1.176 },
         { material: 'Alublech/Aluzink (Stehfalz)', path: ['faktor'], oldValue: 1.08, newValue: 1.176 },
+        // Traufblech/Tropfblech: Verhältnis lfm Material pro lfm Traufe/Ortgang
+        // war zunächst 1:1 angesetzt, jetzt auf reale Herstellerangaben korrigiert.
+        { material: 'Traufblech', path: ['traufeFaktor'], oldValue: 1, newValue: 0.2 },
+        { material: 'Tropfblech', path: ['traufeFaktor'], oldValue: 1, newValue: 0.1 },
+        // Traufblech/Tropfblech werden als Blechzuschnitt in m² statt in
+        // laufenden Metern geführt.
+        { material: 'Traufblech', path: ['einheit'], oldValue: 'm', newValue: 'm²' },
+        { material: 'Tropfblech', path: ['einheit'], oldValue: 'm', newValue: 'm²' },
     ];
 
     CORRECTIONS.forEach(({ material, path, oldValue, newValue }) => {
