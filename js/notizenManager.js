@@ -7,6 +7,21 @@ let mode = 'draw';
 let lastLine;
 let tr;
 
+// Manuelles Verschieben mit dem Finger auf leerer Fläche (siehe
+// stage.on('mousedown touchstart'/'mousemove touchmove', ...) weiter unten).
+// touch-action bleibt bewusst dauerhaft 'none' (siehe initNotizen), damit der
+// Apple Pencil beim Zeichnen NIE mit einem vom Browser selbst gestarteten
+// nativen Scroll-Versuch kollidiert (das führte zuvor zu ruckeligen/
+// abgehackten Strichen) - das Scrollen per Finger übernehmen wir stattdessen
+// hier komplett selbst.
+let isPanningTouch = false;
+let lastPanClientY = 0;
+
+// Sanftere, weniger eckige Linien beim Freihandzeichnen (Standard-Rezept für
+// Konva-Freihandlinien: eine leichte "tension" glättet die Kurve zwischen den
+// Punkten, statt sie als reine Geradensegmente zu verbinden).
+const FREEHAND_LINE_TENSION = 0.4;
+
 // Zuletzt erkannter Eingabetyp ("mouse" | "pen" | "touch"), erfasst über
 // einen nativen "pointerdown"-Listener auf dem Container (siehe initNotizen).
 // Damit lässt sich unterscheiden, ob ein Zeichnen-Versuch vom Apple Pencil
@@ -128,6 +143,14 @@ export function initNotizen() {
 
     container.style.overflowY = 'auto';
     container.style.overflowX = 'hidden';
+    // Dauerhaft 'none': der Browser soll bei KEINEM Touch auf der
+    // Zeichenfläche selbst irgendeine native Aktion (Scrollen/Zoomen)
+    // versuchen - weder mit dem Finger noch mit dem Apple Pencil. Das
+    // Verschieben mit dem Finger übernehmen wir komplett selbst (siehe
+    // isPanningTouch weiter unten); so kann der Pencil beim Zeichnen nie mit
+    // einem vom Browser gestarteten Scroll-Versuch kollidieren, was zuvor zu
+    // ruckeligen/abgehackten Strichen geführt hat.
+    container.style.touchAction = 'none';
 
     // Wächst das Blatt automatisch mit, sobald man beim Wischen/Schieben
     // (z.B. mit dem Finger auf dem iPad, siehe "Verschieben"-Modus) in die
@@ -149,16 +172,12 @@ export function initNotizen() {
         container: 'notizen-container',
         width: initialWidth,
         height: initialHeight,
-        // WICHTIG: Konva ruft standardmäßig (preventDefault:true) intern IMMER
+        // Konva ruft standardmäßig (preventDefault:true) intern selbst
         // event.preventDefault() für jedes native "touchstart" auf der Stage
-        // auf - unabhängig von touch-action und unabhängig davon, ob unsere
-        // eigene mousedown/touchstart-Logik überhaupt reagiert. Das killt
-        // natives Scrollen/Wischen komplett, auch wenn container.style.
-        // touchAction 'pan-y' ist. Da wir das Verhindern des Scrollens
-        // während eines aktiven Pencil-/Maus-Strichs bereits selbst über
-        // e.evt.preventDefault() im touchmove-Handler übernehmen (siehe
-        // dort), brauchen/wollen wir Konvas automatisches preventDefault
-        // hier nicht - sonst lässt sich das Blatt mit dem Finger nicht schieben.
+        // auf. Da wir das komplette Touch-Verhalten (Zeichnen mit dem
+        // Pencil vs. manuelles Verschieben mit dem Finger, siehe unten)
+        // ohnehin selbst steuern, ist das nicht nötig - und würde sich mit
+        // unserer eigenen preventDefault-Logik im Weg stehen.
         preventDefault: false,
     });
 
@@ -187,24 +206,39 @@ export function initNotizen() {
         if (e.target === stage) {
             tr.nodes([]);
         }
+
+        // Ein Finger zeichnet/radiert nie mehr (siehe unten), sondern
+        // verschiebt stattdessen das Blatt - aber NUR, wenn er auf leerer
+        // Fläche aufsetzt (e.target === stage). Landet der Finger dagegen
+        // auf einem Bild/Textfeld, wird hier NICHTS weiter gemacht, damit
+        // dessen eigenes draggable-Verhalten (siehe wireImageInteractions)
+        // wie gewohnt greift - Bilder/Textfelder bleiben mit dem Finger
+        // verschiebbar.
+        if (lastPointerType === 'touch') {
+            if (e.target === stage) {
+                const touch = e.evt.touches && e.evt.touches[0];
+                if (touch) {
+                    isPanningTouch = true;
+                    lastPanClientY = touch.clientY;
+                }
+            }
+            return;
+        }
+
         if (mode !== 'draw' && mode !== 'erase') return;
         if (e.target !== stage) return;
-        // Nur mit dem Apple Pencil (oder der Maus, z.B. am Desktop) darf
-        // gezeichnet/radiert werden - ein Finger soll das Blatt nicht mehr
-        // versehentlich bemalen, sondern ist ausschließlich zum Verschieben
-        // (Scrollen) da.
-        if (lastPointerType === 'touch') return;
 
         isPaint = true;
         let pos = stage.getPointerPosition();
         if (!pos) return;
-        
+
         lastLine = new Konva.Line({
             stroke: mode === 'erase' ? '#fafbff' : '#0b66ff',
             strokeWidth: mode === 'erase' ? 40 : 3,
             globalCompositeOperation: mode === 'erase' ? 'destination-out' : 'source-over',
             lineCap: 'round',
             lineJoin: 'round',
+            tension: FREEHAND_LINE_TENSION,
             points: [pos.x, pos.y, pos.x, pos.y],
         });
         drawingLayer.add(lastLine);
@@ -212,9 +246,23 @@ export function initNotizen() {
 
     stage.on('mouseup touchend', function () {
         isPaint = false;
+        isPanningTouch = false;
     });
 
     stage.on('mousemove touchmove', function (e) {
+        if (isPanningTouch) {
+            e.evt.preventDefault();
+            const touch = e.evt.touches && e.evt.touches[0];
+            if (touch && container) {
+                // Finger nach oben ziehen = Blatt nach unten schieben (wie
+                // natives Scrollen), daher lastPanClientY - touch.clientY.
+                const deltaY = lastPanClientY - touch.clientY;
+                container.scrollTop += deltaY;
+                lastPanClientY = touch.clientY;
+                ensureEndlessHeight();
+            }
+            return;
+        }
         if (!isPaint) return;
         e.evt.preventDefault();
         const pos = stage.getPointerPosition();
@@ -313,34 +361,38 @@ export function initNotizen() {
     // Stift-Button: ein einfacher Klick/Tap wechselt (wie bisher) in den
     // Zeichnen-Modus. Ein Doppelklick/Doppeltipp schaltet stattdessen
     // zwischen Radiergummi und Stift um (schnelles Radieren ohne
-    // Werkzeugwechsel). WICHTIG: das wird bewusst NICHT über das native
-    // "dblclick"-Event erkannt, sondern über den zeitlichen Abstand
-    // zwischen zwei "click"-Events selbst nachgebildet - Safari auf dem
-    // iPad synthetisiert "dblclick" bei einem Finger-Doppeltipp nicht
-    // zuverlässig (das war der Grund, warum die Umschaltung auf dem iPad
-    // nicht funktionierte). "click" selbst feuert dagegen zuverlässig bei
-    // jedem Tap/Klick, auch auf dem iPad.
+    // Werkzeugwechsel). WICHTIG: das wird bewusst über "pointerdown" erkannt,
+    // nicht über "click" oder "dblclick" - beide werden auf dem iPad bei
+    // einem Finger-Doppeltipp teils verzögert oder inkonsistent synthetisiert
+    // (das war der Grund, warum die Umschaltung auf dem iPad nicht
+    // funktionierte). "pointerdown" feuert dagegen sofort und zuverlässig bei
+    // jeder Berührung, für Finger, Pencil und Maus gleichermaßen.
     const btnNoteDraw = document.getElementById('btn-note-draw');
     btnNoteDraw.style.touchAction = 'manipulation'; // verhindert Doppeltipp-Zoom auf dem Button (iPad Safari)
-    const DRAW_BTN_DOUBLE_CLICK_MS = 350;
-    let drawBtnClickTimer = null;
-    let drawBtnLastClickAt = 0;
-    btnNoteDraw.addEventListener('click', () => {
+    const DRAW_BTN_DOUBLE_TAP_MS = 350;
+    let drawBtnSingleTimer = null;
+    let drawBtnLastDownAt = 0;
+    btnNoteDraw.addEventListener('pointerdown', (e) => {
         const now = Date.now();
-        const isDoubleClick = (now - drawBtnLastClickAt) < DRAW_BTN_DOUBLE_CLICK_MS;
-        drawBtnLastClickAt = isDoubleClick ? 0 : now; // reset, damit ein 3. schneller Klick nicht sofort wieder als "Doppelklick" zählt
-        if (drawBtnClickTimer) { clearTimeout(drawBtnClickTimer); drawBtnClickTimer = null; }
-        if (isDoubleClick) {
+        const isDoubleTap = (now - drawBtnLastDownAt) < DRAW_BTN_DOUBLE_TAP_MS;
+        drawBtnLastDownAt = isDoubleTap ? 0 : now; // reset, damit ein 3. schneller Tap nicht sofort wieder als "Doppeltipp" zählt
+        if (drawBtnSingleTimer) { clearTimeout(drawBtnSingleTimer); drawBtnSingleTimer = null; }
+        if (isDoubleTap) {
+            e.preventDefault();
             setMode(mode === 'erase' ? 'draw' : 'erase');
             return;
         }
-        // Kurz abwarten, ob noch ein zweiter Klick folgt (s.o.) - erst dann
+        // Kurz abwarten, ob noch ein zweiter Tap folgt (s.o.) - erst dann
         // wirklich in den Zeichnen-Modus wechseln.
-        drawBtnClickTimer = setTimeout(() => {
-            drawBtnClickTimer = null;
+        drawBtnSingleTimer = setTimeout(() => {
+            drawBtnSingleTimer = null;
             setMode('draw');
-        }, DRAW_BTN_DOUBLE_CLICK_MS);
+        }, DRAW_BTN_DOUBLE_TAP_MS);
     });
+    // Das normale "click" auf demselben Button unterdrücken - sonst würde es
+    // (leicht verzögert, aber zuverlässig zusätzlich zu "pointerdown")
+    // nochmal setMode('draw') auslösen und die obige Logik durcheinanderbringen.
+    btnNoteDraw.addEventListener('click', (e) => e.preventDefault());
     document.getElementById('btn-note-erase').addEventListener('click', () => setMode('erase'));
     document.getElementById('btn-note-text').addEventListener('click', () => setMode('text'));
     document.getElementById('btn-note-pan').addEventListener('click', () => setMode('pan'));
@@ -387,15 +439,9 @@ function setMode(newMode) {
     else if (mode === 'erase') container.style.cursor = 'cell';
     else if (mode === 'pan') container.style.cursor = 'grab';
     else container.style.cursor = 'crosshair';
-    // WICHTIG: touch-action bleibt in JEDEM Modus 'pan-y', nicht nur in
-    // "Verschieben"/"Text". Da ein Finger inzwischen (siehe lastPointerType-
-    // Prüfung oben in stage.on('mousedown touchstart', ...)) ohnehin NIE
-    // zeichnet/radiert - egal welcher Modus gerade aktiv ist - würde 'none'
-    // während "Stift"/"Radiergummi" das native Wischen mit dem Finger
-    // blockieren, OHNE dass dafür noch ein Zeichnen-Konflikt bestünde. Genau
-    // das war der Bug: das Blatt ließ sich per Finger nur im extra
-    // "Verschieben"-Modus schieben, nicht im (meistens aktiven) Stift-Modus.
-    container.style.touchAction = 'pan-y';
+    // touch-action bleibt unabhängig vom Modus dauerhaft 'none' (siehe
+    // initNotizen) - das Verschieben mit dem Finger übernehmen wir in JEDEM
+    // Modus selbst (isPanningTouch), nicht über natives Browser-Scrollen.
 }
 
 function addTextNode(x, y) {
@@ -623,6 +669,7 @@ export function restoreNotizen(data) {
             globalCompositeOperation: l.globalCompositeOperation || 'source-over',
             lineCap: 'round',
             lineJoin: 'round',
+            tension: FREEHAND_LINE_TENSION,
             points: l.points,
         });
         drawingLayer.add(line);
