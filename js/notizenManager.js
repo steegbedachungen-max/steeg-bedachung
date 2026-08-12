@@ -1,11 +1,45 @@
 // js/notizenManager.js
 import { showConfirm } from './dialogManager.js';
 
-let stage, drawingLayer, objectLayer;
+let stage, drawingLayer, objectLayer, container;
 let isPaint = false;
-let mode = 'draw'; 
+let mode = 'draw';
 let lastLine;
-let tr; 
+let tr;
+
+// --- "Endlosblatt": das Notizen-Blatt hat keine feste Höhe mehr, sondern
+// wächst automatisch mit, sobald man beim Zeichnen/Verschieben/Einfügen in
+// die Nähe des aktuellen unteren Randes kommt. GROW_STEP_PX bestimmt die
+// Schrittgröße (in Canvas-Pixeln), GROW_THRESHOLD_PX den "Sicherheitsabstand"
+// zum Rand, ab dem verlängert wird, bevor man tatsächlich am Ende ankommt.
+const GROW_STEP_PX = 2000;
+const GROW_THRESHOLD_PX = 400;
+
+/**
+ * Verlängert das Notizen-Blatt (stage-Höhe) bei Bedarf, damit es sich wie ein
+ * Endlosblatt verhält statt bei einer festen Höhe abzuschneiden.
+ * @param {number} [pointerY] Aktuelle Y-Position (in Canvas-Pixeln) des
+ * Interessenpunkts (Zeichenstift, verschobenes Objekt). Wird kein Wert
+ * übergeben, wird stattdessen anhand der aktuellen Scroll-Position des
+ * Containers geprüft (z.B. beim Wischen/Schieben auf dem iPad).
+ */
+function ensureEndlessHeight(pointerY) {
+    if (!stage) return;
+    const currentHeight = stage.height();
+    let neededBottom;
+    if (typeof pointerY === 'number') {
+        neededBottom = pointerY + GROW_THRESHOLD_PX;
+    } else if (container) {
+        neededBottom = container.scrollTop + container.clientHeight + GROW_THRESHOLD_PX;
+    } else {
+        return;
+    }
+    if (neededBottom > currentHeight) {
+        // Auf ein Vielfaches von GROW_STEP_PX aufrunden, damit das Blatt in
+        // gleichmäßigen Schritten wächst statt nur um den exakt benötigten Rest.
+        stage.height(Math.ceil(neededBottom / GROW_STEP_PX) * GROW_STEP_PX);
+    }
+}
 
 // Maße der nutzbaren Fläche einer PDF-Export-Seite (siehe exportManager.js:
 // usableWmm ≈ 190mm Breite, nutzbare Höhe pro Seite ≈ 242mm).
@@ -82,11 +116,16 @@ function compressImageDataUrl(imgObj, targetDisplayWidth, targetDisplayHeight) {
 }
 
 export function initNotizen() {
-    const container = document.getElementById('notizen-container');
+    container = document.getElementById('notizen-container');
     if (!container) return;
 
     container.style.overflowY = 'auto';
     container.style.overflowX = 'hidden';
+
+    // Wächst das Blatt automatisch mit, sobald man beim Wischen/Schieben
+    // (z.B. mit dem Finger auf dem iPad, siehe "Verschieben"-Modus) in die
+    // Nähe des aktuellen unteren Randes kommt.
+    container.addEventListener('scroll', () => ensureEndlessHeight());
 
     let initialWidth = container.clientWidth > 0 ? container.clientWidth : 1000;
     let initialHeight = 4000; 
@@ -146,11 +185,20 @@ export function initNotizen() {
 
     stage.on('mousemove touchmove', function (e) {
         if (!isPaint) return;
-        e.evt.preventDefault(); 
+        e.evt.preventDefault();
         const pos = stage.getPointerPosition();
         if (!pos) return;
         let newPoints = lastLine.points().concat([pos.x, pos.y]);
         lastLine.points(newPoints);
+        ensureEndlessHeight(pos.y);
+    });
+
+    // Auch beim Verschieben eines Bildes/Textfelds per Drag soll das Blatt
+    // automatisch weiter wachsen, wenn man nahe an den unteren Rand zieht.
+    objectLayer.on('dragmove', (e) => {
+        if (e.target === tr) return;
+        const rect = e.target.getClientRect({ skipTransform: false });
+        ensureEndlessHeight(rect.y + rect.height);
     });
 
     stage.on('click tap', function (e) {
@@ -209,6 +257,9 @@ export function initNotizen() {
                 tr.nodes([konvaImg]);
                 tr.moveToTop();
                 wireImageInteractions(konvaImg);
+                // Endlosblatt: falls das neu eingefügte Bild unten aus dem
+                // bisherigen Blatt herausragen würde, das Blatt verlängern.
+                ensureEndlessHeight(konvaImg.y() + konvaImg.height());
 
                 if (compressedDataUrl) {
                     // Auch die im Speicher gehaltene Bildquelle selbst auf
@@ -231,6 +282,7 @@ export function initNotizen() {
     document.getElementById('btn-note-draw').addEventListener('click', () => setMode('draw'));
     document.getElementById('btn-note-erase').addEventListener('click', () => setMode('erase'));
     document.getElementById('btn-note-text').addEventListener('click', () => setMode('text'));
+    document.getElementById('btn-note-pan').addEventListener('click', () => setMode('pan'));
     document.getElementById('btn-note-clear').addEventListener('click', async () => {
         if (await showConfirm("Alles löschen?", "Möchten Sie wirklich alle Notizen löschen?")) {
             drawingLayer.destroyChildren();
@@ -239,6 +291,10 @@ export function initNotizen() {
             objectLayer.add(tr);
         }
     });
+
+    // Anfangszustand (Button-Hervorhebung, Cursor, touch-action) synchron
+    // zum Default-Modus 'draw' setzen.
+    setMode('draw');
 }
 
 // Verdrahtet die Interaktionen (auswählen, per Doppelklick löschen) für ein
@@ -259,16 +315,24 @@ function setMode(newMode) {
     mode = newMode;
     const activeBg = '#0b66ff', inactiveBg = '#f8f9fa';
     if (tr) tr.nodes([]);
-    document.getElementById('btn-note-draw').style.backgroundColor = mode === 'draw' ? activeBg : inactiveBg;
-    document.getElementById('btn-note-draw').style.color = mode === 'draw' ? 'white' : '#212529';
-    document.getElementById('btn-note-erase').style.backgroundColor = mode === 'erase' ? activeBg : inactiveBg;
-    document.getElementById('btn-note-erase').style.color = mode === 'erase' ? 'white' : '#212529';
-    document.getElementById('btn-note-text').style.backgroundColor = mode === 'text' ? activeBg : inactiveBg;
-    document.getElementById('btn-note-text').style.color = mode === 'text' ? 'white' : '#212529';
-    const container = document.getElementById('notizen-container');
+    [['btn-note-draw', 'draw'], ['btn-note-erase', 'erase'], ['btn-note-text', 'text'], ['btn-note-pan', 'pan']].forEach(([id, m]) => {
+        const btn = document.getElementById(id);
+        if (!btn) return;
+        btn.style.backgroundColor = mode === m ? activeBg : inactiveBg;
+        btn.style.color = mode === m ? 'white' : '#212529';
+    });
+    if (!container) return;
     if (mode === 'text') container.style.cursor = 'text';
     else if (mode === 'erase') container.style.cursor = 'cell';
+    else if (mode === 'pan') container.style.cursor = 'grab';
     else container.style.cursor = 'crosshair';
+    // Beim Zeichnen/Radieren übernimmt unser eigener Handler das komplette
+    // Touch-Handling (siehe touchmove-Listener, preventDefault), daher blockt
+    // 'none' zusätzlich natives Scrollen, damit der erste Touch nicht kurz
+    // "zuckt". In "Verschieben" (und "Text") soll der Browser dagegen
+    // natives, vertikales Wischen zulassen - dadurch lässt sich das
+    // Endlosblatt wie erwartet mit dem Finger nach unten schieben.
+    container.style.touchAction = (mode === 'draw' || mode === 'erase') ? 'none' : 'pan-y';
 }
 
 function addTextNode(x, y) {
@@ -461,7 +525,11 @@ export function serializeNotizen() {
     });
 
     if (lines.length === 0 && objects.length === 0) return null;
-    return { lines, objects };
+    // canvasHeight: die aktuelle (ggf. durch das Endlosblatt-Wachstum
+    // vergrößerte) Blatthöhe wird mitgesichert, damit sie beim Wiederherstellen
+    // nicht wieder auf die Start-Höhe zurückfällt und dadurch weiter unten
+    // liegende Inhalte abgeschnitten werden (siehe restoreNotizen()).
+    return { lines, objects, canvasHeight: stage ? stage.height() : undefined };
 }
 
 /**
@@ -476,6 +544,13 @@ export function restoreNotizen(data) {
     objectLayer.destroyChildren();
     tr = new Konva.Transformer({ keepRatio: true, padding: 5, borderStroke: '#0b66ff' });
     objectLayer.add(tr);
+
+    // Endlosblatt: gesicherte Höhe wiederherstellen, damit ein zuvor
+    // gewachsenes Blatt nicht wieder auf die Start-Höhe schrumpft und
+    // dadurch weiter unten liegende Inhalte abschneidet.
+    if (typeof data.canvasHeight === 'number' && data.canvasHeight > stage.height()) {
+        stage.height(data.canvasHeight);
+    }
 
     (data.lines || []).forEach(l => {
         if (!Array.isArray(l.points)) return;
@@ -524,6 +599,20 @@ export function restoreNotizen(data) {
             imgObj.src = o.dataUrl;
         }
     });
+
+    // Sicherheitsnetz: falls canvasHeight fehlt (ältere Speicherstände) oder
+    // kleiner als der tatsächliche Inhalt ist, anhand der wiederhergestellten
+    // Linien/Objekte selbst nachrechnen, statt sich allein auf data.canvasHeight
+    // zu verlassen.
+    let restoredMaxBottom = 0;
+    (data.lines || []).forEach(l => {
+        if (!Array.isArray(l.points)) return;
+        for (let i = 1; i < l.points.length; i += 2) restoredMaxBottom = Math.max(restoredMaxBottom, l.points[i]);
+    });
+    (data.objects || []).forEach(o => {
+        restoredMaxBottom = Math.max(restoredMaxBottom, (o.y || 0) + (o.height || 0));
+    });
+    ensureEndlessHeight(restoredMaxBottom);
 
     drawingLayer.batchDraw();
     objectLayer.batchDraw();
