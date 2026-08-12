@@ -64,6 +64,13 @@ export function setAutoDimensionVisible(value) {
     autoDimensionVisible = value;
 }
 
+// --- Verschattung (Schattenwurf von Hindernissen wie Kaminen auf die
+// Dachfläche, siehe shading.js) ---
+export let shadingVisible = false;
+export function setShadingVisible(value) {
+    shadingVisible = value;
+}
+
 // --- Konstanten / Utilities ---
 
 // Fester Fang-Radius in SCREEN-PIXELN (unabhaengig von Zoom und Massstab).
@@ -72,6 +79,25 @@ export const SNAP_RADIUS_PX = 10;
 
 // Legacy-Konstante bleibt als Fallback erhalten (wird aber nicht mehr direkt genutzt)
 export const SNAP_THRESHOLD = 0.1;
+
+// Mindestabstand ("Luft") zwischen zwei nebeneinander/übereinander
+// platzierten PV-Modulen in Metern - reale Modul-Montage braucht diesen
+// Spalt (Klemmen/Wärmedehnung), daher rastet snap.js zwei PV-Module beim
+// Aneinanderschieben NICHT bündig (0cm) ein, sondern mit diesem Abstand.
+// Für PV-Modul <-> Dachkante/Hindernis (rechteck) bleibt es weiterhin
+// bündig, siehe snap.js.
+export const PV_MODULE_GAP_M = 0.02;
+
+// Pflicht-Mindestabstand rund um ein Dachfenster in Metern (Sicherheits-
+// /Montageabstand, damit dort kein PV-Modul zu dicht heranrückt). Wird
+// zweifach genutzt:
+//  1. figure.js zeichnet einen rot-schraffierten Rahmen in dieser Breite
+//     um jedes Fenster (istFenster: true), damit die Sperrzone sofort
+//     sichtbar ist.
+//  2. snap.js lässt andere Objekte (PV-Module, Hindernisse) beim
+//     Heranschieben an ein Fenster NICHT bündig einrasten, sondern mit
+//     genau diesem Abstand - siehe getSnapResult().
+export const FENSTER_ABSTAND_M = 0.20;
 
 /**
  * Berechnet den Snap-Schwellenwert in METER-Koordinaten,
@@ -98,4 +124,4 @@ export const BASE_FONT_SIZE_EDGE = 16;
 export const BASE_FONT_SIZE_MAIN = 20;
 
 // Hilfsfunktion um UserData robust zu lesen
-export const getUserData = (n) => n?.getAttr("userData") || null; null;
+export const getUserData = (n) => n?.getAttr("userData") || null;

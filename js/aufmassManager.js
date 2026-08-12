@@ -663,6 +663,11 @@ function createMaterialBlock(lengthTotals, areaTotals, accessoryTotals, filter, 
     // pro Reihe wird links/rechts genau EIN Ortgangziegel benötigt, die
     // Reihenanzahl ist also die exakteste bekannte Größe dafür.
     let anzahlReihenExakt = null;
+    // Falls die Reihen-Berechnung mehr als eine gültige Lösung zulässt (z.B.
+    // sowohl 17 als auch 18 Reihen passen innerhalb der zulässigen
+    // Decklängen-Spanne des Ziegels), wird hier die Auswahl-Info für die
+    // UI (Dropdown) gesammelt - siehe canUseRowCalc-Zweig weiter unten.
+    let rowCountChoiceInfo = null;
 
     if (totalAreaM2 > 0) {
         // Präzise Berechnung nach Handwerker-Logik:
@@ -763,6 +768,7 @@ function createMaterialBlock(lengthTotals, areaTotals, accessoryTotals, filter, 
             }
             const DB_m = tile.deckbreite_cm / 100;             // Deckbreite in m
             const maxLattweite_m = decklaengeRange.max / 100;  // maximale Lattweite in m
+            const minLattweite_m = decklaengeRange.min / 100;  // minimale Lattweite in m
 
             // Schritt 4: Deckbreite -> Ziegel pro Reihe (entlang der Traufe).
             // Wie beim Lattmaß auf ganze Ziegel runden (nicht zwingend
@@ -782,19 +788,59 @@ function createMaterialBlock(lengthTotals, areaTotals, accessoryTotals, filter, 
             ziegelProReihe = Math.max(1, ziegelProReihe - ortgangAbzug);
 
             // Schritt 1-3: Ortganglänge minus Firstlattmaß minus Trauflattmaß,
-            // Rest durch maximale Lattweite, aufrunden, + 1
+            // Rest durch maximale Lattweite, aufrunden, + 1 -> das ergibt die
+            // MINIMALE Reihenzahl (größtmögliche, aber noch zulässige
+            // Lattenweite). Da die Decklänge des Ziegels i.d.R. als Spanne
+            // (min-max) hinterlegt ist, kann man dieselbe Restlänge aber auch
+            // mit ENGERER Lattenweite (näher am Minimum) verteilen und kommt
+            // dann auf eine oder mehrere Reihen MEHR - beides ist technisch
+            // zulässig, in der Praxis wählt der Dachdecker je nach
+            // gewünschtem Lattmaß/Optik. Wir bieten daher, falls mehr als
+            // eine Reihenzahl innerhalb der zulässigen Spanne möglich ist,
+            // eine Auswahl an (siehe rowCountChoiceInfo/UI weiter unten) -
+            // Standard bleibt weiterhin die minimale Reihenzahl (unverändertes
+            // bisheriges Verhalten), bis der Nutzer explizit etwas anderes wählt.
             const LAF_m = (tile.firstlattmass_cm !== undefined) ? (tile.firstlattmass_cm / 100) : 0;
             const restlaenge = Math.max(0, ortgangLength - LAF_m - LAT_m);
-            const anzahlLatten = Math.ceil(restlaenge / maxLattweite_m);
+            const minLattenCount = Math.max(1, Math.ceil(restlaenge / maxLattweite_m));
+            const maxLattenCountRaw = Math.floor(restlaenge / minLattweite_m);
+            // Auf maximal 5 zusätzliche Optionen deckeln (Sicherheitsnetz
+            // gegen absurd breite Spannen bei fehlerhaften Materialdaten).
+            const maxLattenCount = Math.max(minLattenCount, Math.min(maxLattenCountRaw, minLattenCount + 5));
+
+            const latOptions = [];
+            for (let l = minLattenCount; l <= maxLattenCount; l++) latOptions.push(l);
+
+            let chosenLatten = minLattenCount;
+            const override = tile.rowCountLattenOverride;
+            if (latOptions.length > 1 && Number.isInteger(override) && latOptions.includes(override)) {
+                chosenLatten = override;
+            }
+
+            const anzahlLatten = chosenLatten;
             const anzahlReihen = Math.max(1, anzahlLatten + 1);
             anzahlReihenExakt = anzahlReihen;
+
+            if (latOptions.length > 1) {
+                rowCountChoiceInfo = {
+                    tile,
+                    chosenLatten,
+                    options: latOptions.map(l => ({
+                        latten: l,
+                        reihen: l + 1,
+                        spacing_cm: (restlaenge / l) * 100
+                    }))
+                };
+            }
 
             const firstlattInfo = (tile.firstlattmass_cm !== undefined) ? `${LAF_m.toFixed(3)}m Firstlattmaß` : `0m Firstlattmaß (nicht hinterlegt)`;
             const trauflattInfo = (tile.trauflattmass_cm !== undefined)
                 ? `${LAT_m.toFixed(3)}m Trauflattmaß`
                 : `${LAT_m.toFixed(3)}m Trauflattmaß [Annahme]`;
-            const reihenFormelTeil = `(${ortgangLength.toFixed(2)}m Ortganglänge − ${firstlattInfo} − ${trauflattInfo}) / ${maxLattweite_m.toFixed(3)}m max. Lattweite, aufgerundet, + 1`;
             const genauesLattmass = anzahlLatten > 0 ? (restlaenge / anzahlLatten) : 0;
+            const reihenFormelTeil = (chosenLatten === minLattenCount)
+                ? `(${ortgangLength.toFixed(2)}m Ortganglänge − ${firstlattInfo} − ${trauflattInfo}) / ${maxLattweite_m.toFixed(3)}m max. Lattweite, aufgerundet, + 1`
+                : `(${ortgangLength.toFixed(2)}m Ortganglänge − ${firstlattInfo} − ${trauflattInfo}) / ${(genauesLattmass).toFixed(3)}m Lattweite (manuell gewählt), + 1`;
             const ortgangAbzugInfo = ortgangAbzug > 0 ? `, − ${ortgangAbzug} Ortgangziegel-Position${ortgangAbzug > 1 ? 'en' : ''}` : '';
 
             requiredQty = anzahlReihen * ziegelProReihe;
@@ -1071,7 +1117,15 @@ function createMaterialBlock(lengthTotals, areaTotals, accessoryTotals, filter, 
         latInfo = ` (Durchschnittsfaktor: ${tile.faktor} ${tile.einheit}/m²)`;
     }
     html += `<div style="margin-bottom: 15px;">**Gewählte Hauptdeckung:** ${tile.material}${latInfo}</div>`;
-    
+
+    // Falls mehrere Reihenzahlen (unterschiedliche Lattenweiten innerhalb der
+    // zulässigen Decklängen-Spanne) rechnerisch gültig sind, Platzhalter für
+    // die Auswahl-Dropdown reservieren (siehe rowCountChoiceInfo weiter oben
+    // und die Verkabelung weiter unten, analog zum sketch-buttons-placeholder).
+    if (rowCountChoiceInfo && rowCountChoiceInfo.options.length > 1) {
+        html += `<div class="row-count-choice-placeholder" style="margin-bottom: 15px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;"></div>`;
+    }
+
     html += '<table><thead><tr><th>Material / Posten</th><th>Gesamtmenge</th></tr></thead><tbody>';
 
     let hasData = false;
@@ -1122,6 +1176,37 @@ function createMaterialBlock(lengthTotals, areaTotals, accessoryTotals, filter, 
             sBtn.onclick = () => openTileChoiceModal(idx);
             btnPlaceholder.appendChild(sBtn);
         });
+    }
+
+    // Auswahl-Dropdown für die Reihenzahl/Lattenweite einfügen, falls
+    // rechnerisch mehr als eine Lösung innerhalb der zulässigen
+    // Decklängen-Spanne des Ziegels möglich ist (z.B. 17 oder 18 Reihen).
+    // Die Wahl wird direkt auf dem Material-Objekt der (ersten) zugehörigen
+    // Skizze gespeichert (rowCountLattenOverride) - dieses Objekt ist Teil
+    // von sk.material und wird daher automatisch mit exportiert/autogespeichert,
+    // ohne dass dataState.js/importExportManager.js/autosaveManager.js
+    // angepasst werden müssen.
+    const rowChoicePlaceholder = materialBlock.querySelector('.row-count-choice-placeholder');
+    if (rowChoicePlaceholder && rowCountChoiceInfo) {
+        const label = document.createElement('span');
+        label.style.cssText = 'color:#666; font-size:0.9em;';
+        label.textContent = `⚠️ Mehrere Lattenweiten möglich:`;
+        rowChoicePlaceholder.appendChild(label);
+
+        const select = document.createElement('select');
+        select.style.cssText = 'font-size:0.9em; padding:3px 6px;';
+        rowCountChoiceInfo.options.forEach(opt => {
+            const optionEl = document.createElement('option');
+            optionEl.value = String(opt.latten);
+            optionEl.textContent = `${opt.reihen} Reihen (Lattmaß ${opt.spacing_cm.toFixed(1)}cm)`;
+            if (opt.latten === rowCountChoiceInfo.chosenLatten) optionEl.selected = true;
+            select.appendChild(optionEl);
+        });
+        select.onchange = () => {
+            rowCountChoiceInfo.tile.rowCountLattenOverride = parseInt(select.value, 10);
+            renderMaterialPage();
+        };
+        rowChoicePlaceholder.appendChild(select);
     }
 }
 

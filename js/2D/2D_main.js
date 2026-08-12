@@ -6,7 +6,8 @@ import { initSidePanel } from './uiSidePanel.js';
 import { initSnap } from './snap.js';
 import { initJsonHandlers } from './jsonHandlers.js'; 
 import { selectNode } from './selection.js';
-import { renderActivePage, captureCurrentPage, switchPage, addEmptyPage, duplicateActivePage, deleteActivePage, renameActivePage, getPagesForUI, pagesState } from './pages.js';
+import { renderActivePage, captureCurrentPage, switchPage, addEmptyPage, duplicateActivePage, deleteActivePage, renameActivePage, getPagesForUI, pagesState, getActivePage, setActivePageDachdaten } from './pages.js';
+import { createDachCompass } from './compass.js';
 
 // ##### HIER WIRD DER KREIS GEBROCHEN #####
 import { initFigureModule } from './figure.js'; 
@@ -82,7 +83,21 @@ function initPagesUI() {
     // PV-Summen-Seiten-Auswahl (für Aufmaßblatt)
     const pvSelectEl = document.getElementById('pv-page-select');
 
+    // Dachneigung/-ausrichtung der aktiven Seite (für die Verschattungsberechnung, siehe shading.js)
+    const neigungInput = document.getElementById('dachneigung-2d');
+    const kompassContainer = document.getElementById('dachausrichtung-kompass');
+
     if (!selectEl) return;
+
+    // Kompass-Widget statt Dropdown: Nadel per Maus/Finger auf die
+    // Himmelsrichtung ziehen (oder Richtung direkt antippen), rastet auf
+    // die 8 Himmelsrichtungen ein - schreibt direkt in die Seitendaten.
+    const initialAusrichtung = Number.isFinite(getActivePage()?.dachausrichtung) ? getActivePage().dachausrichtung : 180;
+    const dachKompass = kompassContainer
+        ? createDachCompass(kompassContainer, initialAusrichtung, (deg) => {
+              setActivePageDachdaten(undefined, deg);
+          })
+        : null;
 
     const refresh = () => {
         const pages = getPagesForUI();
@@ -96,6 +111,11 @@ function initPagesUI() {
             if (p.id === pagesState.activePageId) opt.selected = true;
             selectEl.appendChild(opt);
         });
+
+        // Dachneigung/-ausrichtung der aktiven Seite anzeigen
+        const active = getActivePage();
+        if (neigungInput) neigungInput.value = Number.isFinite(active?.dachneigung) ? active.dachneigung : 0;
+        if (dachKompass) dachKompass.setValue(Number.isFinite(active?.dachausrichtung) ? active.dachausrichtung : 180);
 
         // PV-Dropdown
         if (pvSelectEl) {
@@ -129,6 +149,11 @@ function initPagesUI() {
     selectEl.addEventListener('change', () => {
         switchPage(selectEl.value);
         refresh();
+    });
+
+    neigungInput?.addEventListener('input', () => {
+        const v = parseFloat(neigungInput.value);
+        setActivePageDachdaten(Number.isFinite(v) ? v : 0, undefined);
     });
 
     addBtn?.addEventListener('click', () => {

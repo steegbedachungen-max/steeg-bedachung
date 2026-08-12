@@ -5,6 +5,7 @@ import { erstelleFigur } from './figure.js';
 import { selectNode } from './selection.js';
 import { getUserData } from './state.js';
 import { refreshAutoDimensions } from './autoDimension.js';
+import { refreshShadingSync } from './shading.js';
 
 // ==========================================
 // Pages state
@@ -16,7 +17,10 @@ function uid() {
 
 export const pagesState = {
     pages: [
-        { id: 'p1', name: 'Seite 1', objects: [], measurements: [] }
+        // dachneigung (Grad) / dachausrichtung (Grad, Kompass 0=Nord..270=West)
+        // werden für die Verschattungsberechnung (shading.js) benötigt.
+        // Default: flach/Süden, bis der Nutzer die echten Werte einträgt.
+        { id: 'p1', name: 'Seite 1', objects: [], measurements: [], dachneigung: 0, dachausrichtung: 180 }
     ],
     activePageId: 'p1',
     includeMeasurementsOnDuplicate: true,
@@ -24,6 +28,18 @@ export const pagesState = {
 
 export function getActivePage() {
     return pagesState.pages.find(p => p.id === pagesState.activePageId) || pagesState.pages[0];
+}
+
+/**
+ * Setzt Dachneigung/-ausrichtung der aktiven Seite (für die
+ * Verschattungsberechnung) und stößt ein Neuzeichnen an.
+ */
+export function setActivePageDachdaten(dachneigung, dachausrichtung) {
+    const page = getActivePage();
+    if (!page) return;
+    if (Number.isFinite(dachneigung)) page.dachneigung = dachneigung;
+    if (Number.isFinite(dachausrichtung)) page.dachausrichtung = dachausrichtung;
+    refreshShadingSync();
 }
 
 function deepCopy(obj) {
@@ -201,6 +217,7 @@ export function renderActivePage() {
     // gerenderte Seite neu berechnen - u.a. wichtig für den PDF-Export,
     // der renderActivePage() je Seite aufruft, bevor er sie als Bild einfängt.
     refreshAutoDimensions();
+    refreshShadingSync();
 }
 
 // ==========================================
@@ -210,9 +227,16 @@ export function renderActivePage() {
 export function addEmptyPage() {
     captureCurrentPage();
 
+    // Dachneigung/-ausrichtung von der aktuellen Seite übernehmen (häufig
+    // dieselbe Dachfläche/dasselbe Gebäude) - kann pro Seite angepasst werden.
+    const current = getActivePage();
     const newId = uid();
     const pageNumber = pagesState.pages.length + 1;
-    pagesState.pages.push({ id: newId, name: `Seite ${pageNumber}`, objects: [], measurements: [] });
+    pagesState.pages.push({
+        id: newId, name: `Seite ${pageNumber}`, objects: [], measurements: [],
+        dachneigung: current?.dachneigung ?? 0,
+        dachausrichtung: current?.dachausrichtung ?? 180
+    });
     pagesState.activePageId = newId;
     renderActivePage();
 }
@@ -229,6 +253,8 @@ export function duplicateActivePage() {
         name: `${src.name} (Kopie)`,
         objects: deepCopy(src.objects || []),
         measurements: pagesState.includeMeasurementsOnDuplicate ? deepCopy(src.measurements || []) : [],
+        dachneigung: src.dachneigung ?? 0,
+        dachausrichtung: src.dachausrichtung ?? 180,
     };
 
     pagesState.pages.push(clone);

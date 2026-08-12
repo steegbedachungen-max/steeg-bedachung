@@ -1,12 +1,39 @@
 /* global Konva */
 import { stage, layer } from './stage.js';
-import { labelsVisible, BASE_FONT_SIZE_EDGE, BASE_FONT_SIZE_MAIN, getActiveScale } from './state.js';
+import { labelsVisible, BASE_FONT_SIZE_EDGE, BASE_FONT_SIZE_MAIN, getActiveScale, FENSTER_ABSTAND_M } from './state.js';
 import { isMeasuring, handleMeasurementClick } from './measurement.js';
 import { refreshAutoDimensions } from './autoDimension.js';
+import { refreshShadingSync } from './shading.js';
 
 let selectedLabel = null;
 const DEFAULT_FILL = '#222';
-const SELECTED_FILL = 'dodgerblue'; 
+const SELECTED_FILL = 'dodgerblue';
+
+// --- Dachfenster-Sperrzone (rot schraffiert) ---
+// Kleine, einmalig erzeugte Canvas-Kachel mit diagonalen roten Linien, die
+// als Konva-Füllmuster (fillPatternImage, repeat) für den Sperrbereich rund
+// um jedes Dachfenster genutzt wird - macht auf einen Blick sichtbar, dass
+// dort kein PV-Modul hin sollte (siehe FENSTER_ABSTAND_M in state.js).
+let fensterHatchPatternCache = null;
+function getFensterHatchPattern() {
+    if (fensterHatchPatternCache) return fensterHatchPatternCache;
+    const size = 10;
+    const c = document.createElement('canvas');
+    c.width = size; c.height = size;
+    const pctx = c.getContext('2d');
+    pctx.strokeStyle = 'rgba(220, 38, 38, 0.6)';
+    pctx.lineWidth = 1.5;
+    // Drei parallele diagonale Linien (inkl. Randstücke), damit das Muster
+    // beim Kacheln (repeat) lückenlos ineinander übergeht.
+    [-size, 0, size].forEach(offset => {
+        pctx.beginPath();
+        pctx.moveTo(offset, size);
+        pctx.lineTo(offset + size, 0);
+        pctx.stroke();
+    });
+    fensterHatchPatternCache = c;
+    return c;
+}
 
 let onSelectNodeCallback = null; 
 
@@ -160,6 +187,7 @@ function updateDataOnDragEnd(e) {
     }
     node.setAttr('userData', ud);
     refreshAutoDimensions();
+    refreshShadingSync();
 }
 
 export function addPVModule(moduleName = "PV", pvWidthM = 1.13, pvHeightM = 1.72, cascadeOffset = 0) {
@@ -192,6 +220,7 @@ export function addPVModule(moduleName = "PV", pvWidthM = 1.13, pvHeightM = 1.72
     erstelleFigur(newPVData, onSelectNodeCallback);
     layer.batchDraw();
     refreshAutoDimensions();
+    refreshShadingSync();
 }
 
 export function addWindow(windowName, windowWidthM, windowHeightM) {
@@ -205,20 +234,26 @@ export function addWindow(windowName, windowWidthM, windowHeightM) {
     };
     
     const newWindowData = {
-        typ: "rechteck", 
-        name: windowName, 
+        typ: "rechteck",
+        name: windowName,
         x_meter: (viewCenter.x / scale) - (windowWidthM / 2),
         y_meter: (viewCenter.y / scale) - (windowHeightM / 2),
-        width_meter: windowWidthM, 
+        width_meter: windowWidthM,
         height_meter: windowHeightM,
-        fill: "#e0f7fa", 
-        stroke: "#006064", 
-        locked: false
+        fill: "#e0f7fa",
+        stroke: "#006064",
+        locked: false,
+        // Markiert dieses Rechteck als Dachfenster (im Unterschied zu einem
+        // generischen "Hindernis") - erstelleFigur() zeichnet dafür einen
+        // rot-schraffierten Sperrbereich (siehe FENSTER_ABSTAND_M), und
+        // snap.js lässt andere Objekte dort nicht bündig andocken.
+        istFenster: true
     };
     
     erstelleFigur(newWindowData, onSelectNodeCallback);
     layer.batchDraw();
     refreshAutoDimensions();
+    refreshShadingSync();
 }
 
 /**
@@ -228,7 +263,7 @@ export function addWindow(windowName, windowWidthM, windowHeightM) {
  * PV-Modulen/Fenstern abhebt. Zählt für die Autobemaßung wie jedes andere
  * Objekt (Abstand zur Dachkante + zum nächsten Nachbarobjekt).
  */
-export function addObstacle(name, widthM, heightM) {
+export function addObstacle(name, widthM, heightM, schattenHoeheM = 0) {
     if (!onSelectNodeCallback) return;
     const scale = getActiveScale();
 
@@ -245,6 +280,11 @@ export function addObstacle(name, widthM, heightM) {
         y_meter: (viewCenter.y / scale) - (heightM / 2),
         width_meter: widthM,
         height_meter: heightM,
+        // Vertikale Höhe über der Dachfläche (z.B. Kaminhöhe) - unabhängig
+        // von width_meter/height_meter (die die Grundfläche in der
+        // Dachebene beschreiben). Nur für die Verschattungsberechnung
+        // (shading.js) genutzt; 0/nicht gesetzt = kein Schatten berechnet.
+        schattenHoeheM: Number(schattenHoeheM) || 0,
         fill: "#f5cba7",
         stroke: "#d35400",
         locked: false
@@ -253,6 +293,7 @@ export function addObstacle(name, widthM, heightM) {
     erstelleFigur(newObstacleData, onSelectNodeCallback);
     layer.batchDraw();
     refreshAutoDimensions();
+    refreshShadingSync();
 }
 
 export function initFigureModule(onSelect) {
@@ -323,7 +364,22 @@ export function erstelleFigur(el, onSelectNode) {
     const posX = el.x_meter ? (el.x_meter * scale) : el.x;
     const posY = el.y_meter ? (el.y_meter * scale) : el.y;
     
-    const onMainLabelMouseDown = (e) => { e.cancelBubble = true; };
+    // WICHTIG: e.cancelBubble = true verhindert, dass dieser Klick zum
+    // "mousedown"-Handler des übergeordneten Moduls (weiter unten,
+    // f.on("mousedown touchstart", ...)) durchgereicht wird. Ohne den
+    // zusätzlichen onSelectNode(f)-Aufruf hier blieb das Modul selbst dadurch
+    // UNAUSGEWÄHLT, wenn man auf sein (oft über die eigentliche Form
+    // hinausragendes, z.B. bei langen Namen wie "1,13 x 1,76m") Namens-Label
+    // klickte - die blaue gestrichelte Auswahl-Markierung erschien dann gar
+    // nicht bzw. blieb an der zuvor ausgewählten Stelle stehen, statt zum
+    // angeklickten Modul zu "rücken" (siehe Bug-Report: "das blaue drum
+    // herum rückt nicht mit"). Jetzt wird das Modul beim Klick auf sein
+    // Label zusätzlich mit ausgewählt, so wie es beim Klick auf die Form
+    // selbst auch passiert.
+    const onMainLabelMouseDown = (e) => {
+        e.cancelBubble = true;
+        if (!isMeasuring()) onSelectNode(f);
+    };
     const onMainLabelClick = (e) => {
         e.cancelBubble = true;
         const label = e.target;
@@ -373,6 +429,34 @@ export function erstelleFigur(el, onSelectNode) {
         const groupX = (typeof posX === 'number') ? (posX + offsetX) : (offsetX);
         const groupY = (typeof posY === 'number') ? (posY + offsetY) : (offsetY);
         f = new Konva.Group({ x: groupX, y: groupY, offset: { x: offsetX, y: offsetY }, draggable: true, listening: true, hitStrokeWidth: 20 });
+
+        // Dachfenster: rot-schraffierten Sperrbereich UNTER dem eigentlichen
+        // Fenster-Rechteck einfügen (zuerst hinzufügen = zeichnet zuerst =
+        // liegt optisch dahinter), damit rundherum ein sichtbarer
+        // Warn-Rahmen entsteht, statt das Fenster selbst zu verdecken. Da
+        // dieses Rect ein Kind DERSELBEN Gruppe ist, bewegt/dreht es sich
+        // automatisch mit dem Fenster mit - keine separate Sync-Logik nötig.
+        // Gleiche lokale Mitte wie rectShape (siehe dortiger Offset-Kommentar):
+        // symmetrisch um FENSTER_ABSTAND_M vergrößert, aber mit dem GLEICHEN
+        // offset={offsetX,offsetY}, da sich die lokale Mitte (x+width/2)
+        // durch die symmetrische Vergrößerung nicht verschiebt.
+        if (el.istFenster) {
+            const marginPx = FENSTER_ABSTAND_M * scale;
+            const keepOutRect = new Konva.Rect({
+                x: -marginPx, y: -marginPx,
+                width: width + 2 * marginPx, height: height + 2 * marginPx,
+                offset: { x: offsetX, y: offsetY },
+                fillPatternImage: getFensterHatchPattern(),
+                fillPatternRepeat: 'repeat',
+                stroke: '#dc2626',
+                strokeWidth: 1,
+                dash: [4, 3],
+                listening: false,
+                name: 'fensterSperrzone'
+            });
+            f.add(keepOutRect);
+        }
+
         const rectShape = new Konva.Rect({ x: 0, y: 0, width, height, offset: { x: offsetX, y: offsetY }, fill: (el.typ === "pv_modul") ? "#2C3E50" : (el.fill || "#9fd0a3"), stroke: (el.typ === "pv_modul") ? "#7F8C8D" : (el.stroke || "black"), strokeWidth: 2, name: "shape" });
         f.add(rectShape);
         if (typeof el.x_meter !== 'number') el.x_meter = groupX / scale;

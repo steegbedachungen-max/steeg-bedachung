@@ -4,6 +4,7 @@ import { selectedNode, setSelectedNode, getActiveScale, getUserData, setLastPvMo
 import { updatePanelState } from './uiSidePanel.js';
 import { deselectActiveLabel } from './figure.js';
 import { refreshAutoDimensions } from './autoDimension.js';
+import { refreshShadingSync } from './shading.js';
 
 export function highlightNode(n, on) {
     // Zerstöre nur die alte selectionBox, nicht alles
@@ -76,6 +77,7 @@ export function deleteSelectedNode() {
     // Setzt den Zustand zurück (wählt "nichts" aus und deaktiviert das UI-Panel)
     selectNode(null);
     refreshAutoDimensions();
+    refreshShadingSync();
 }
 
 /**
@@ -101,6 +103,15 @@ export function nudgeSelectedNode(deltaX_m, deltaY_m) {
     updatePanelState(selectedNode);
     layer.batchDraw();
 
+    // 3b. WICHTIG: Die blaue Auswahl-Markierung (selectionBox) neu zeichnen.
+    // Sie ist ein eigenes, einmalig positioniertes Konva-Rect auf dem
+    // guideLayer (siehe highlightNode()) und wird NICHT automatisch von
+    // selectedNode.move() mitverschoben. Ohne diesen Aufruf bleibt die Box
+    // exakt an der alten Stelle stehen, während sich das Modul mit jedem
+    // Tastendruck/Klick auf die Pfeil-Buttons weiter davon entfernt - genau
+    // der gemeldete Bug ("das blaue drum herum rückt nicht mit").
+    highlightNode(selectedNode, true);
+
     // 4. WICHTIG: Die userData (Meter-Werte) ebenfalls aktualisieren
     const ud = selectedNode.getAttr('userData');
     if (!ud) return;
@@ -117,4 +128,5 @@ export function nudgeSelectedNode(deltaX_m, deltaY_m) {
     }
     selectedNode.setAttr('userData', ud);
     refreshAutoDimensions();
+    refreshShadingSync();
 }

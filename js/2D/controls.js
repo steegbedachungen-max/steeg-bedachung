@@ -5,6 +5,7 @@ import { deselectActiveLabel } from './figure.js';
 import { isMeasuring, handleMeasurementClick } from './measurement.js';
 import { selectedNode } from './state.js';
 import { rescaleAutoDimensionsForZoom } from './autoDimension.js';
+import { rescaleShadingForZoom } from './shading.js';
 
 const scaleBy = 1.1, minScale = 0.5, maxScale = 4;
 
@@ -34,6 +35,7 @@ export function initZoomPan() {
             line.strokeWidth(newStrokeWidth);
         });
         rescaleAutoDimensionsForZoom(newScale);
+        rescaleShadingForZoom(newScale);
 
         stage.batchDraw();
         zoomIndicator.textContent = `Zoom: ${Math.round(newScale * 100)} %`;

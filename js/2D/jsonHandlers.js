@@ -1,5 +1,7 @@
 import { layer, stage } from './stage.js';
 import { erstelleFigur } from './figure.js';
+import { pagesState, captureCurrentPage, renderActivePage } from './pages.js';
+import { getActiveScale, setActiveScale } from './state.js';
 // selectNode wird hier nicht direkt importiert, um zirkuläre Abhängigkeiten zu vermeiden
 
 const loadInput = document.getElementById("load-input");
@@ -13,8 +15,18 @@ function loadJson(e) {
     r.onload = (x) => {
         try {
             const d = JSON.parse(x.target.result);
-            // Nutze die neue Lade-Logik
-            loadDataFromArray(d); 
+            if (Array.isArray(d)) {
+                // Altes Format (vor der Mehrseiten-Unterstützung): flaches
+                // Array von Figuren, betrifft nur die aktuell aktive Seite -
+                // aus Kompatibilitätsgründen weiterhin unterstützt.
+                loadDataFromArray(d);
+            } else if (d && Array.isArray(d.pages)) {
+                // Neues Format: ALLE Seiten der 2D-Planung/PV-Belegung
+                // (inkl. Dachneigung/-ausrichtung je Seite), siehe saveJson().
+                loadPagesFromObject(d);
+            } else {
+                throw new Error("Unbekanntes Datenformat.");
+            }
             alert("✅ JSON geladen!");
         } catch (err) { alert("❌ Fehler: " + err.message); }
     };
@@ -22,26 +34,42 @@ function loadJson(e) {
 }
 
 function saveJson() {
-    const arr = [];
-    layer.getChildren().forEach(n => {
-        const ud = n.getAttr("userData");
-        if (ud) {
-            ud.rotation = n.rotation() || 0;
-            ud.locked = n.getAttr("locked") || false;
-            
-            // Bereinige unnötige Daten
-            delete ud.labelPos;
-            delete ud.labelRot;
-            delete ud.edgeLabelData;
-            
-            arr.push(ud);
-        }
-    });
-    
-    const blob = new Blob([JSON.stringify(arr, null, 2)], { type: "application/json" });
+    // Sicherstellen, dass der gerade sichtbare Bearbeitungsstand der aktiven
+    // Seite in pagesState übernommen wird, bevor wir exportieren - sonst
+    // würde eine Bearbeitung ohne vorherigen Seitenwechsel fehlen.
+    try { captureCurrentPage(); } catch (e) { /* noch nicht bereit */ }
+
+    // WICHTIG: exportiert ALLE Seiten der 2D-Planung/PV-Belegung (nicht nur
+    // die gerade sichtbare) inklusive Dachneigung/-ausrichtung je Seite -
+    // vorher wurde hier nur layer.getChildren() der aktiven Seite
+    // exportiert, wodurch alle anderen Dachflächen/Seiten beim erneuten
+    // Laden verloren gingen.
+    const exportData = {
+        version: '2d-pages-v1',
+        pages: pagesState.pages,
+        activePageId: pagesState.activePageId,
+        scale: getActiveScale()
+    };
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = "canvas_data.json"; a.click();
+    const a = document.createElement("a"); a.href = url; a.download = "2d_planung.json"; a.click();
     URL.revokeObjectURL(url);
+}
+
+/**
+ * Lädt ALLE Seiten aus einem Export-Objekt (neues Mehrseiten-Format, siehe
+ * saveJson()) - ersetzt die komplette 2D-Planung/PV-Belegung.
+ * @param {{pages: Array<object>, activePageId?: string, scale?: number}} data
+ */
+function loadPagesFromObject(data) {
+    if (!Array.isArray(data.pages) || data.pages.length === 0) {
+        throw new Error("Datei enthält keine Seiten.");
+    }
+    pagesState.pages = data.pages;
+    pagesState.activePageId = data.activePageId || data.pages[0].id;
+    if (data.scale) setActiveScale(data.scale);
+    renderActivePage();
 }
 
 /**
@@ -51,10 +79,10 @@ function saveJson() {
  */
 export function loadDataFromArray(dataArray) {
     if (!Array.isArray(dataArray)) throw new Error("Daten müssen ein Array sein!");
-    
+
     layer.destroyChildren();
     // Hier wird die übergebene Callback-Funktion genutzt
-    dataArray.forEach(o => erstelleFigur(o, onSelectNodeCallback)); 
+    dataArray.forEach(o => erstelleFigur(o, onSelectNodeCallback));
     stage.draw();
 }
 

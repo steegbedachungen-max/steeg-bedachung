@@ -152,6 +152,21 @@
                         <option value="active">Aktive 2D-Seite</option>
                     </select>
                 </label>
+
+                <div class="toolbar-divider"></div>
+
+                <!-- Dachneigung/-ausrichtung dieser Seite - wird für die
+                     Verschattungsberechnung (shading.js) benötigt. Konvention:
+                     die Traufe/Dachfuß liegt unten in der Skizze (in Richtung
+                     der Dachausrichtung), die Firstlinie oben. -->
+                <label style="display:flex; align-items:center; gap:6px;" title="Neigung dieser Dachfläche in Grad (0=flach, 90=senkrecht)">
+                    Dachneigung (°):
+                    <input type="number" id="dachneigung-2d" value="0" min="0" max="90" step="1" style="width: 70px;">
+                </label>
+                <label style="display:flex; align-items:center; gap:6px;" title="Himmelsrichtung, in die diese Dachfläche zeigt (Traufe unten in der Skizze) - Nadel mit Maus/Finger ziehen oder Himmelsrichtung direkt antippen">
+                    Dachausrichtung:
+                    <div id="dachausrichtung-kompass"></div>
+                </label>
             </div>
         </div>
 
@@ -172,6 +187,7 @@
              <button id="label-toggle-btn">Beschriftung: AN</button>
              <button id="grid-toggle-btn">Grid: AN</button>
              <button id="autodim-toggle-btn">📐 Autobemaßung: AUS</button>
+             <button id="shading-toggle-btn">☀️ Verschattung: AUS</button>
              <button id="measure-btn">📏 Messen</button>
              <button id="snap-90-degree-btn" style="display: none;">90°</button>
              <div class="toolbar-divider"></div>

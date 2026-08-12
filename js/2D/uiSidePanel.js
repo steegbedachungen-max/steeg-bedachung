@@ -4,6 +4,7 @@ import { selectedNode } from './state.js';
 import { normalizeEdgeLabels, updateLockVisual } from './figure.js';
 import { deleteSelectedNode } from './selection.js'; // <-- ##### IMPORT IST BEREITS VORHANDEN #####
 import { refreshAutoDimensions } from './autoDimension.js';
+import { refreshShadingSync } from './shading.js';
 
 // --- DOM-Referenzen ---
 const xInput = document.getElementById("pos-x");
@@ -29,6 +30,7 @@ function setRotationAroundCenter(node, angle) {
     normalizeEdgeLabels(node); // Helfer aus figure.js
     layer.batchDraw();
     refreshAutoDimensions();
+    refreshShadingSync();
 }
 
 function rotStep(d) {
@@ -99,8 +101,8 @@ export function updatePanelState(n) {
  * Hängt alle Event-Listener an die Panel-Buttons.
  */
 export function initSidePanel() {
-    xInput.oninput = () => { if (!selectedNode) return; const x = parseFloat(xInput.value); if (isFinite(x)) { const p = selectedNode.position(); selectedNode.position({ x, y: p.y }); layer.batchDraw(); refreshAutoDimensions(); } };
-    yInput.oninput = () => { if (!selectedNode) return; const y = parseFloat(yInput.value); if (isFinite(y)) { const p = selectedNode.position(); selectedNode.position({ x: p.x, y }); layer.batchDraw(); refreshAutoDimensions(); } };
+    xInput.oninput = () => { if (!selectedNode) return; const x = parseFloat(xInput.value); if (isFinite(x)) { const p = selectedNode.position(); selectedNode.position({ x, y: p.y }); layer.batchDraw(); refreshAutoDimensions(); refreshShadingSync(); } };
+    yInput.oninput = () => { if (!selectedNode) return; const y = parseFloat(yInput.value); if (isFinite(y)) { const p = selectedNode.position(); selectedNode.position({ x: p.x, y }); layer.batchDraw(); refreshAutoDimensions(); refreshShadingSync(); } };
     rotInput.oninput = () => { if (!selectedNode) return; const v = parseFloat(rotInput.value); if (isFinite(v)) setRotationAroundCenter(selectedNode, v); };
     
     bM1.onclick = () => rotStep(-1);

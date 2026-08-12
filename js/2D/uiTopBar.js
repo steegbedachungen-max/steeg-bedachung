@@ -8,12 +8,14 @@ import {
     gridVisible, setGridVisible,
     selectedNode, setSelectedNode, getUserData,
     lastPvModuleSize, setLastPvModuleSize, incrementPvCascadeCount,
-    autoDimensionVisible, setAutoDimensionVisible
+    autoDimensionVisible, setAutoDimensionVisible,
+    shadingVisible, setShadingVisible
 } from './state.js';
 
 import { reDrawAllFigures, addPVModule, addWindow, addObstacle } from './figure.js';
 import { nudgeSelectedNode, highlightNode } from './selection.js';
 import { refreshAutoDimensions } from './autoDimension.js';
+import { refreshShading, refreshShadingSync } from './shading.js';
 
 import {
     toggleMeasurementMode,
@@ -25,6 +27,7 @@ import {
 let snapBtn, labelToggleBtn;
 let gridBtn;
 let autodimToggleBtn;
+let shadingToggleBtn;
 let scaleBtn25, scaleBtn50, scaleBtn100;
 let allScaleBtns = [];
 let addPvBtn;
@@ -100,6 +103,7 @@ export function initTopBar() {
     addWindowBtn = document.getElementById("add-window-btn");
     addObstacleBtn = document.getElementById("add-obstacle-btn");
     autodimToggleBtn = document.getElementById("autodim-toggle-btn");
+    shadingToggleBtn = document.getElementById("shading-toggle-btn");
 
     const measureBtn = document.getElementById("measure-btn");
     toggleBtn2D = document.getElementById("toggle-controls-btn-2d"); 
@@ -156,8 +160,28 @@ export function initTopBar() {
         };
     }
 
+    // --- Verschattung: berechnet den Schattenwurf von Hindernissen mit
+    // hinterlegter Höhe (z.B. Kamin) zur Wintersonnenwende (9-15 Uhr) auf
+    // die Dachfläche und markiert betroffene PV-Module. Nutzt die
+    // Projekt-Anschrift für den echten Sonnenstand (OpenStreetMap-
+    // Geokodierung); ohne Adresse/bei Fehler wird eine Faustregel
+    // (~2-2,5x Hindernishöhe) als Kreis angezeigt.
+    if (shadingToggleBtn) {
+        shadingToggleBtn.onclick = async () => {
+            setShadingVisible(!shadingVisible);
+            shadingToggleBtn.textContent = shadingVisible ? "☀️ Verschattung: AN (wird berechnet…)" : "☀️ Verschattung: AUS";
+            if (shadingVisible) {
+                const address = document.getElementById('projekt-anschrift')?.value || '';
+                await refreshShading(address);
+                shadingToggleBtn.textContent = "☀️ Verschattung: AN";
+            } else {
+                refreshShadingSync();
+            }
+        };
+    }
+
     if (measureBtn) {
-        initMeasurementModule(measureBtn); 
+        initMeasurementModule(measureBtn);
         measureBtn.onclick = toggleMeasurementMode;
     }
 
@@ -230,17 +254,19 @@ export function initTopBar() {
         addObstacleBtn.onclick = async () => {
             const name = await window.showPrompt("Hindernis einfügen", "Bezeichnung (z.B. Kamin, Lüfter, Antenne):", "Kamin");
             if (!name) return;
-            const wStr = await window.showPrompt("Hindernis einfügen", "Breite in Metern:", "0.5");
+            const wStr = await window.showPrompt("Hindernis einfügen", "Breite in Metern (Grundfläche):", "0.5");
             if (wStr === null || wStr === undefined || wStr === "") return;
-            const hStr = await window.showPrompt("Hindernis einfügen", "Höhe/Tiefe in Metern:", "0.5");
+            const hStr = await window.showPrompt("Hindernis einfügen", "Tiefe in Metern (Grundfläche):", "0.5");
             if (hStr === null || hStr === undefined || hStr === "") return;
+            const shStr = await window.showPrompt("Hindernis einfügen", "Höhe über Dach in Metern (für Verschattungsberechnung, 0 = keine Berechnung):", "0.8");
             const w = parseFloat(String(wStr).replace(',', '.'));
             const h = parseFloat(String(hStr).replace(',', '.'));
-            if (!isFinite(w) || !isFinite(h) || w <= 0 || h <= 0) {
+            const sh = shStr === null || shStr === undefined || shStr === "" ? 0 : parseFloat(String(shStr).replace(',', '.'));
+            if (!isFinite(w) || !isFinite(h) || w <= 0 || h <= 0 || !isFinite(sh) || sh < 0) {
                 if (window.showAlert) window.showAlert("Ungültige Eingabe", "Bitte gültige Maße (in Metern) eingeben.");
                 return;
             }
-            addObstacle(name, w, h);
+            addObstacle(name, w, h, sh);
         };
     }
 

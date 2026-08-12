@@ -1,6 +1,6 @@
 /* global Konva */
 import { stage, layer, guideLayer } from './stage.js';
-import { snapEnabled, getUserData, getActiveScale, getSnapThreshold, SNAP_RADIUS_PX } from './state.js';
+import { snapEnabled, getUserData, getActiveScale, getSnapThreshold, SNAP_RADIUS_PX, PV_MODULE_GAP_M, FENSTER_ABSTAND_M } from './state.js';
 import { highlightNode } from './selection.js';
 
 // --- Private Helfer ---
@@ -119,21 +119,46 @@ export function getObjectSnapLines(n) {
     const maxX_m = (correctedRect.x + correctedRect.width) / scale;
     const maxY_m = (correctedRect.y + correctedRect.height) / scale;
 
+    const isFenster = ud.istFenster === true;
+
     return {
         vertical: [
-            { guide: minX_m, snap: "start" },
-            { guide: maxX_m, snap: "end" },
-            { guide: (minX_m + maxX_m) / 2, snap: "center" }
+            { guide: minX_m, snap: "start", srcTyp: ud.typ, isFenster },
+            { guide: maxX_m, snap: "end", srcTyp: ud.typ, isFenster },
+            { guide: (minX_m + maxX_m) / 2, snap: "center", srcTyp: ud.typ, isFenster }
         ],
         horizontal: [
-            { guide: minY_m, snap: "start" },
-            { guide: maxY_m, snap: "end" },
-            { guide: (minY_m + maxY_m) / 2, snap: "center" }
+            { guide: minY_m, snap: "start", srcTyp: ud.typ, isFenster },
+            { guide: maxY_m, snap: "end", srcTyp: ud.typ, isFenster },
+            { guide: (minY_m + maxY_m) / 2, snap: "center", srcTyp: ud.typ, isFenster }
         ],
         points
     };
 }
 
+/**
+ * Ermittelt die Snap-Kandidaten (pro Achse alle Treffer innerhalb der
+ * Fangzone). Werden zwei PV-Module über GEGENÜBERLIEGENDE Kanten
+ * aneinandergeschoben (z.B. linke Kante des gezogenen Moduls an die rechte
+ * Kante eines Nachbarmoduls), ist das "nebeneinander platzieren" (Zeile/
+ * Reihe) - dafür wird NICHT bündig (0cm) gefangen, sondern mit
+ * PV_MODULE_GAP_M Abstand (siehe state.js), wie in der echten Montage
+ * üblich. Werden dagegen gleiche Kanten oder Mittelpunkte aneinander
+ * ausgerichtet (z.B. linke Kante an linke Kante, zum Ausrichten mehrerer
+ * Module in einer Reihe/Spalte), bleibt es bündig - das ist eine
+ * Ausrichtungs-Hilfe, keine Aneinanderreihung. Bei jeder anderen
+ * Objekt-Kombination (Dachkante, Hindernis, ...) bleibt alles wie zuvor
+ * bündig.
+ *
+ * Zusätzlich: ist eines der beiden beteiligten Objekte ein Dachfenster
+ * (isFenster, siehe FENSTER_ABSTAND_M in state.js) und werden GEGENÜBER-
+ * LIEGENDE Kanten aneinandergeschoben, wird ebenfalls NICHT bündig gefangen,
+ * sondern mit FENSTER_ABSTAND_M Abstand - so rastet z.B. ein PV-Modul direkt
+ * an der (rot schraffiert dargestellten) Sperrzone um das Fenster ein,
+ * statt am Fenster selbst bündig anzuliegen. Gilt unabhängig vom Typ des
+ * herangezogenen Objekts (PV-Modul oder Hindernis) und unabhängig davon, ob
+ * das Fenster das gezogene oder das stehende Objekt ist.
+ */
 function getSnapResult(drag, stat) {
     const r = { vertical: [], horizontal: [] };
     const zoom = stage.scaleX() || 1;
@@ -142,8 +167,17 @@ function getSnapResult(drag, stat) {
     ["vertical", "horizontal"].forEach(ax => {
         drag[ax].forEach(dl => {
             stat[ax].forEach(sl => {
-                const d = Math.abs(dl.guide - sl.guide);
-                if (d < threshold) r[ax].push({ guide: sl.guide, diff: d, snap: dl.snap });
+                const isOppositeEdge = (dl.snap === 'start' && sl.snap === 'end') || (dl.snap === 'end' && sl.snap === 'start');
+                const isPvAdjacency = dl.srcTyp === 'pv_modul' && sl.srcTyp === 'pv_modul' && isOppositeEdge;
+                const isFensterAdjacency = !isPvAdjacency && (dl.isFenster || sl.isFenster) && isOppositeEdge;
+                let targetGuide = sl.guide;
+                if (isPvAdjacency) {
+                    targetGuide = dl.snap === 'start' ? sl.guide + PV_MODULE_GAP_M : sl.guide - PV_MODULE_GAP_M;
+                } else if (isFensterAdjacency) {
+                    targetGuide = dl.snap === 'start' ? sl.guide + FENSTER_ABSTAND_M : sl.guide - FENSTER_ABSTAND_M;
+                }
+                const d = Math.abs(dl.guide - targetGuide);
+                if (d < threshold) r[ax].push({ guide: targetGuide, diff: d, snap: dl.snap });
             });
         });
     });
