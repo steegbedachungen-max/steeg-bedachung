@@ -7,6 +7,13 @@ let mode = 'draw';
 let lastLine;
 let tr;
 
+// Zuletzt erkannter Eingabetyp ("mouse" | "pen" | "touch"), erfasst über
+// einen nativen "pointerdown"-Listener auf dem Container (siehe initNotizen).
+// Damit lässt sich unterscheiden, ob ein Zeichnen-Versuch vom Apple Pencil
+// (oder der Maus, für Desktop/Tests) oder vom Finger stammt - nur die ersten
+// beiden dürfen zeichnen/radieren, siehe stage.on('mousedown touchstart', ...).
+let lastPointerType = 'mouse';
+
 // --- "Endlosblatt": das Notizen-Blatt hat keine feste Höhe mehr, sondern
 // wächst automatisch mit, sobald man beim Zeichnen/Verschieben/Einfügen in
 // die Nähe des aktuellen unteren Randes kommt. GROW_STEP_PX bestimmt die
@@ -127,6 +134,14 @@ export function initNotizen() {
     // Nähe des aktuellen unteren Randes kommt.
     container.addEventListener('scroll', () => ensureEndlessHeight());
 
+    // Erfasst den Eingabetyp im Capture-Modus, BEVOR das eigentliche
+    // mousedown/touchstart der Stage weiter unten ausgewertet wird - laut
+    // Spezifikation feuert "pointerdown" immer vor den kompatiblen
+    // Touch-/Maus-Events. So weiß der mousedown/touchstart-Handler, ob der
+    // aktuelle Versuch vom Apple Pencil ("pen"), der Maus ("mouse") oder
+    // einem Finger ("touch") stammt.
+    container.addEventListener('pointerdown', (e) => { lastPointerType = e.pointerType; }, true);
+
     let initialWidth = container.clientWidth > 0 ? container.clientWidth : 1000;
     let initialHeight = 4000; 
 
@@ -162,7 +177,12 @@ export function initNotizen() {
             tr.nodes([]);
         }
         if (mode !== 'draw' && mode !== 'erase') return;
-        if (e.target !== stage) return; 
+        if (e.target !== stage) return;
+        // Nur mit dem Apple Pencil (oder der Maus, z.B. am Desktop) darf
+        // gezeichnet/radiert werden - ein Finger soll das Blatt nicht mehr
+        // versehentlich bemalen, sondern ist ausschließlich zum Verschieben
+        // (Scrollen) da.
+        if (lastPointerType === 'touch') return;
 
         isPaint = true;
         let pos = stage.getPointerPosition();
@@ -279,7 +299,27 @@ export function initNotizen() {
         e.target.value = ''; 
     });
 
-    document.getElementById('btn-note-draw').addEventListener('click', () => setMode('draw'));
+    // Stift-Button: ein einfacher Klick wechselt (wie bisher) in den
+    // Zeichnen-Modus. Ein Doppelklick schaltet stattdessen zwischen
+    // Radiergummi und Stift um (schnelles Radieren ohne Werkzeugwechsel).
+    // Der einfache Klick wird dafür kurz verzögert ausgeführt (statt sofort)
+    // und bei einem zweiten Klick/Doppelklick wieder verworfen - sonst würde
+    // er dem dblclick-Handler immer zuvorkommen und die Umschaltung wieder
+    // rückgängig machen, noch bevor sie greift.
+    const btnNoteDraw = document.getElementById('btn-note-draw');
+    btnNoteDraw.style.touchAction = 'manipulation'; // verhindert Doppeltipp-Zoom auf dem Button (iPad Safari)
+    let drawBtnClickTimer = null;
+    btnNoteDraw.addEventListener('click', () => {
+        if (drawBtnClickTimer) clearTimeout(drawBtnClickTimer);
+        drawBtnClickTimer = setTimeout(() => {
+            drawBtnClickTimer = null;
+            setMode('draw');
+        }, 280);
+    });
+    btnNoteDraw.addEventListener('dblclick', () => {
+        if (drawBtnClickTimer) { clearTimeout(drawBtnClickTimer); drawBtnClickTimer = null; }
+        setMode(mode === 'erase' ? 'draw' : 'erase');
+    });
     document.getElementById('btn-note-erase').addEventListener('click', () => setMode('erase'));
     document.getElementById('btn-note-text').addEventListener('click', () => setMode('text'));
     document.getElementById('btn-note-pan').addEventListener('click', () => setMode('pan'));
