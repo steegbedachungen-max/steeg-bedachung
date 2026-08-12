@@ -149,6 +149,17 @@ export function initNotizen() {
         container: 'notizen-container',
         width: initialWidth,
         height: initialHeight,
+        // WICHTIG: Konva ruft standardmäßig (preventDefault:true) intern IMMER
+        // event.preventDefault() für jedes native "touchstart" auf der Stage
+        // auf - unabhängig von touch-action und unabhängig davon, ob unsere
+        // eigene mousedown/touchstart-Logik überhaupt reagiert. Das killt
+        // natives Scrollen/Wischen komplett, auch wenn container.style.
+        // touchAction 'pan-y' ist. Da wir das Verhindern des Scrollens
+        // während eines aktiven Pencil-/Maus-Strichs bereits selbst über
+        // e.evt.preventDefault() im touchmove-Handler übernehmen (siehe
+        // dort), brauchen/wollen wir Konvas automatisches preventDefault
+        // hier nicht - sonst lässt sich das Blatt mit dem Finger nicht schieben.
+        preventDefault: false,
     });
 
     drawingLayer = new Konva.Layer(); 
@@ -299,26 +310,36 @@ export function initNotizen() {
         e.target.value = ''; 
     });
 
-    // Stift-Button: ein einfacher Klick wechselt (wie bisher) in den
-    // Zeichnen-Modus. Ein Doppelklick schaltet stattdessen zwischen
-    // Radiergummi und Stift um (schnelles Radieren ohne Werkzeugwechsel).
-    // Der einfache Klick wird dafür kurz verzögert ausgeführt (statt sofort)
-    // und bei einem zweiten Klick/Doppelklick wieder verworfen - sonst würde
-    // er dem dblclick-Handler immer zuvorkommen und die Umschaltung wieder
-    // rückgängig machen, noch bevor sie greift.
+    // Stift-Button: ein einfacher Klick/Tap wechselt (wie bisher) in den
+    // Zeichnen-Modus. Ein Doppelklick/Doppeltipp schaltet stattdessen
+    // zwischen Radiergummi und Stift um (schnelles Radieren ohne
+    // Werkzeugwechsel). WICHTIG: das wird bewusst NICHT über das native
+    // "dblclick"-Event erkannt, sondern über den zeitlichen Abstand
+    // zwischen zwei "click"-Events selbst nachgebildet - Safari auf dem
+    // iPad synthetisiert "dblclick" bei einem Finger-Doppeltipp nicht
+    // zuverlässig (das war der Grund, warum die Umschaltung auf dem iPad
+    // nicht funktionierte). "click" selbst feuert dagegen zuverlässig bei
+    // jedem Tap/Klick, auch auf dem iPad.
     const btnNoteDraw = document.getElementById('btn-note-draw');
     btnNoteDraw.style.touchAction = 'manipulation'; // verhindert Doppeltipp-Zoom auf dem Button (iPad Safari)
+    const DRAW_BTN_DOUBLE_CLICK_MS = 350;
     let drawBtnClickTimer = null;
+    let drawBtnLastClickAt = 0;
     btnNoteDraw.addEventListener('click', () => {
-        if (drawBtnClickTimer) clearTimeout(drawBtnClickTimer);
+        const now = Date.now();
+        const isDoubleClick = (now - drawBtnLastClickAt) < DRAW_BTN_DOUBLE_CLICK_MS;
+        drawBtnLastClickAt = isDoubleClick ? 0 : now; // reset, damit ein 3. schneller Klick nicht sofort wieder als "Doppelklick" zählt
+        if (drawBtnClickTimer) { clearTimeout(drawBtnClickTimer); drawBtnClickTimer = null; }
+        if (isDoubleClick) {
+            setMode(mode === 'erase' ? 'draw' : 'erase');
+            return;
+        }
+        // Kurz abwarten, ob noch ein zweiter Klick folgt (s.o.) - erst dann
+        // wirklich in den Zeichnen-Modus wechseln.
         drawBtnClickTimer = setTimeout(() => {
             drawBtnClickTimer = null;
             setMode('draw');
-        }, 280);
-    });
-    btnNoteDraw.addEventListener('dblclick', () => {
-        if (drawBtnClickTimer) { clearTimeout(drawBtnClickTimer); drawBtnClickTimer = null; }
-        setMode(mode === 'erase' ? 'draw' : 'erase');
+        }, DRAW_BTN_DOUBLE_CLICK_MS);
     });
     document.getElementById('btn-note-erase').addEventListener('click', () => setMode('erase'));
     document.getElementById('btn-note-text').addEventListener('click', () => setMode('text'));
@@ -366,13 +387,15 @@ function setMode(newMode) {
     else if (mode === 'erase') container.style.cursor = 'cell';
     else if (mode === 'pan') container.style.cursor = 'grab';
     else container.style.cursor = 'crosshair';
-    // Beim Zeichnen/Radieren übernimmt unser eigener Handler das komplette
-    // Touch-Handling (siehe touchmove-Listener, preventDefault), daher blockt
-    // 'none' zusätzlich natives Scrollen, damit der erste Touch nicht kurz
-    // "zuckt". In "Verschieben" (und "Text") soll der Browser dagegen
-    // natives, vertikales Wischen zulassen - dadurch lässt sich das
-    // Endlosblatt wie erwartet mit dem Finger nach unten schieben.
-    container.style.touchAction = (mode === 'draw' || mode === 'erase') ? 'none' : 'pan-y';
+    // WICHTIG: touch-action bleibt in JEDEM Modus 'pan-y', nicht nur in
+    // "Verschieben"/"Text". Da ein Finger inzwischen (siehe lastPointerType-
+    // Prüfung oben in stage.on('mousedown touchstart', ...)) ohnehin NIE
+    // zeichnet/radiert - egal welcher Modus gerade aktiv ist - würde 'none'
+    // während "Stift"/"Radiergummi" das native Wischen mit dem Finger
+    // blockieren, OHNE dass dafür noch ein Zeichnen-Konflikt bestünde. Genau
+    // das war der Bug: das Blatt ließ sich per Finger nur im extra
+    // "Verschieben"-Modus schieben, nicht im (meistens aktiven) Stift-Modus.
+    container.style.touchAction = 'pan-y';
 }
 
 function addTextNode(x, y) {
