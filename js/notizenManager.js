@@ -13,8 +13,32 @@ let tr;
 // Pencil beim Zeichnen NIE mit einem vom Browser selbst gestarteten nativen
 // Scroll-Versuch kollidiert - das Scrollen per Finger übernehmen wir
 // stattdessen hier komplett selbst.
+//
+// Handballen-Ablehnung ("Palm Rejection"): Beim Schreiben mit dem Apple
+// Pencil liegt praktisch immer auch die Handkante/der Handballen auf dem
+// Display auf. Da wir touch-action komplett selbst übernehmen (s.o.), würde
+// dieser aufliegende Handballen sonst als "Finger" erkannt und das Blatt bei
+// jeder kleinen Bewegung der Hand hin- und herschieben. Gegenmaßnahmen:
+//  1. isPenActive/lastPenActivityAt: Solange der Pencil aktiv ist (oder es
+//     erst vor kurzem war), wird JEDER Touch-Kontakt ignoriert - das deckt
+//     den Hauptfall (Handballen liegt WÄHREND des Schreibens auf) zuverlässig ab.
+//  2. PAN_START_THRESHOLD_PX: Ein Touch-Kontakt löst erst dann ein
+//     tatsächliches Verschieben aus, wenn er sich um ein Mindestmaß bewegt
+//     hat - ein ruhig aufliegender Handballen (der nur minimal wackelt)
+//     verschiebt das Blatt dadurch nicht mehr allein durchs Aufsetzen.
+//  3. pointerId-Tracking: Nur der Touch-Kontakt, der das Verschieben
+//     tatsächlich ausgelöst hat, wird weiterverfolgt - ein zusätzlicher
+//     zweiter Kontaktpunkt (z. B. weiterer Teil des Handballens) kann das
+//     laufende Verschieben nicht mehr durcheinanderbringen.
+const PALM_REJECTION_WINDOW_MS = 700;
+const PAN_START_THRESHOLD_PX = 12;
+let isPenActive = false;
+let lastPenActivityAt = 0;
 let isPanningTouch = false;
 let lastPanClientY = 0;
+let pendingPanPointerId = null;
+let pendingPanStartX = 0;
+let pendingPanStartY = 0;
 
 // Sammelt die Punkte des GERADE gezeichneten Strichs als eigenes, einfaches
 // JS-Array (statt bei jedem pointermove über lastLine.points().concat(...)
@@ -208,6 +232,11 @@ export function initNotizen() {
             tr.nodes([]);
         }
 
+        if (e.evt.pointerType === 'pen') {
+            isPenActive = true;
+            lastPenActivityAt = Date.now();
+        }
+
         // Ein Finger zeichnet/radiert nie, sondern verschiebt stattdessen
         // das Blatt - aber NUR, wenn er auf leerer Fläche aufsetzt
         // (e.target === stage). Landet der Finger dagegen auf einem Bild/
@@ -215,9 +244,25 @@ export function initNotizen() {
         // draggable-Verhalten (siehe wireImageInteractions) wie gewohnt
         // greift - Bilder/Textfelder bleiben mit dem Finger verschiebbar.
         if (e.evt.pointerType === 'touch') {
+            // Handballen-Ablehnung, Teil 1: Solange der Pencil gerade aktiv
+            // ist (oder es innerhalb des Gnadenfensters kürzlich war), diesen
+            // Touch-Kontakt komplett ignorieren - mit hoher Wahrscheinlichkeit
+            // der aufliegende Handballen, kein bewusstes Wischen (siehe
+            // Erklärung bei den Modul-Variablen oben).
+            if (isPenActive || (Date.now() - lastPenActivityAt) < PALM_REJECTION_WINDOW_MS) {
+                return;
+            }
             if (e.target === stage) {
-                isPanningTouch = true;
+                // Handballen-Ablehnung, Teil 2: Noch nicht sofort verschieben,
+                // sondern erst "vormerken" - erst eine spürbare Bewegung
+                // (siehe pointermove unten, PAN_START_THRESHOLD_PX) bestätigt,
+                // dass es sich um ein bewusstes Wischen handelt und kein nur
+                // ruhig aufliegender Handballen ist.
+                pendingPanPointerId = e.evt.pointerId;
+                pendingPanStartX = e.evt.clientX;
+                pendingPanStartY = e.evt.clientY;
                 lastPanClientY = e.evt.clientY;
+                isPanningTouch = false;
             }
             return;
         }
@@ -243,13 +288,48 @@ export function initNotizen() {
         if (!drawCanvasEl) drawCanvasEl = container.querySelector('canvas');
     });
 
-    stage.on('pointerup pointercancel', function () {
+    stage.on('pointerup pointercancel', function (e) {
+        if (e.evt && e.evt.pointerType === 'pen') {
+            isPenActive = false;
+            // Gnadenfenster (PALM_REJECTION_WINDOW_MS) läuft erst AB JETZT
+            // weiter - deckt kurze Pausen zwischen zwei Strichen ab, in denen
+            // der Handballen weiterhin aufliegt, der Pencil aber kurz abgehoben ist.
+            lastPenActivityAt = Date.now();
+        }
+        if (e.evt && e.evt.pointerId === pendingPanPointerId) {
+            pendingPanPointerId = null;
+        }
         isPaint = false;
         isPanningTouch = false;
         currentStrokePoints = null;
     });
 
     stage.on('pointermove', function (e) {
+        if (e.evt.pointerType === 'pen') {
+            // Auch reine Annäherung/Bewegung des Pencils (nicht nur ein
+            // vollständiger Strich) zählt als "Pencil aktiv" - manche iPads
+            // melden den Pencil bereits kurz vor dem Aufsetzen.
+            lastPenActivityAt = Date.now();
+        }
+
+        if (pendingPanPointerId !== null && e.evt.pointerId === pendingPanPointerId && !isPanningTouch) {
+            if (isPenActive) {
+                // Der Pencil ist inzwischen aktiv geworden (setzt gerade auf),
+                // während dieser Touch-Kontakt noch unbestätigt war - endgültig
+                // als Handballen behandeln, nicht mehr zum Verschieben zulassen.
+                pendingPanPointerId = null;
+                return;
+            }
+            const dx = e.evt.clientX - pendingPanStartX;
+            const dy = e.evt.clientY - pendingPanStartY;
+            if (Math.abs(dx) < PAN_START_THRESHOLD_PX && Math.abs(dy) < PAN_START_THRESHOLD_PX) {
+                // Noch keine spürbare Bewegung - könnte weiterhin nur ein
+                // ruhig aufliegender Handballen sein, also noch nichts verschieben.
+                return;
+            }
+            isPanningTouch = true;
+        }
+
         if (isPanningTouch) {
             e.evt.preventDefault();
             // Finger nach oben ziehen = Blatt nach unten schieben (wie
