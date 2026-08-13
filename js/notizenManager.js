@@ -8,26 +8,21 @@ let lastLine;
 let tr;
 
 // Manuelles Verschieben mit dem Finger auf leerer Fläche (siehe
-// stage.on('mousedown touchstart'/'mousemove touchmove', ...) weiter unten).
-// touch-action bleibt bewusst dauerhaft 'none' (siehe initNotizen), damit der
-// Apple Pencil beim Zeichnen NIE mit einem vom Browser selbst gestarteten
-// nativen Scroll-Versuch kollidiert (das führte zuvor zu ruckeligen/
-// abgehackten Strichen) - das Scrollen per Finger übernehmen wir stattdessen
-// hier komplett selbst.
+// stage.on('pointerdown'/'pointermove', ...) weiter unten). touch-action
+// bleibt bewusst dauerhaft 'none' (siehe initNotizen), damit der Apple
+// Pencil beim Zeichnen NIE mit einem vom Browser selbst gestarteten nativen
+// Scroll-Versuch kollidiert - das Scrollen per Finger übernehmen wir
+// stattdessen hier komplett selbst.
 let isPanningTouch = false;
 let lastPanClientY = 0;
 
-// Sanftere, weniger eckige Linien beim Freihandzeichnen (Standard-Rezept für
-// Konva-Freihandlinien: eine leichte "tension" glättet die Kurve zwischen den
-// Punkten, statt sie als reine Geradensegmente zu verbinden).
-const FREEHAND_LINE_TENSION = 0.4;
-
-// Zuletzt erkannter Eingabetyp ("mouse" | "pen" | "touch"), erfasst über
-// einen nativen "pointerdown"-Listener auf dem Container (siehe initNotizen).
-// Damit lässt sich unterscheiden, ob ein Zeichnen-Versuch vom Apple Pencil
-// (oder der Maus, für Desktop/Tests) oder vom Finger stammt - nur die ersten
-// beiden dürfen zeichnen/radieren, siehe stage.on('mousedown touchstart', ...).
-let lastPointerType = 'mouse';
+// Sammelt die Punkte des GERADE gezeichneten Strichs als eigenes, einfaches
+// JS-Array (statt bei jedem pointermove über lastLine.points().concat(...)
+// eine komplette Kopie des bisherigen Arrays anzulegen - das wird bei langen
+// Strichen zunehmend langsamer/ruckeliger, da jede Kopie O(n) kostet). Wird
+// per push() erweitert und dasselbe Array-Objekt an lastLine.points()
+// übergeben.
+let currentStrokePoints = null;
 
 // --- "Endlosblatt": das Notizen-Blatt hat keine feste Höhe mehr, sondern
 // wächst automatisch mit, sobald man beim Zeichnen/Verschieben/Einfügen in
@@ -152,18 +147,9 @@ export function initNotizen() {
     // ruckeligen/abgehackten Strichen geführt hat.
     container.style.touchAction = 'none';
 
-    // Wächst das Blatt automatisch mit, sobald man beim Wischen/Schieben
-    // (z.B. mit dem Finger auf dem iPad, siehe "Verschieben"-Modus) in die
-    // Nähe des aktuellen unteren Randes kommt.
+    // Wächst das Blatt automatisch mit, sobald man beim Wischen/Schieben mit
+    // dem Finger in die Nähe des aktuellen unteren Randes kommt.
     container.addEventListener('scroll', () => ensureEndlessHeight());
-
-    // Erfasst den Eingabetyp im Capture-Modus, BEVOR das eigentliche
-    // mousedown/touchstart der Stage weiter unten ausgewertet wird - laut
-    // Spezifikation feuert "pointerdown" immer vor den kompatiblen
-    // Touch-/Maus-Events. So weiß der mousedown/touchstart-Handler, ob der
-    // aktuelle Versuch vom Apple Pencil ("pen"), der Maus ("mouse") oder
-    // einem Finger ("touch") stammt.
-    container.addEventListener('pointerdown', (e) => { lastPointerType = e.pointerType; }, true);
 
     let initialWidth = container.clientWidth > 0 ? container.clientWidth : 1000;
     let initialHeight = 4000; 
@@ -202,25 +188,36 @@ export function initNotizen() {
     });
     resizeObserver.observe(container);
 
-    stage.on('mousedown touchstart', function (e) {
+    // WICHTIG: Wir verwenden bewusst die "pointerdown"/"pointermove"/
+    // "pointerup"-Events (Konvas Pointer-Events-Unterstützung ist per
+    // Default aktiv), NICHT "mousedown touchstart" etc. Zwei Gründe:
+    //  1. e.evt.pointerType liefert direkt und zuverlässig "mouse"/"pen"/
+    //     "touch" - kein separates Tracking über einen zusätzlichen
+    //     "pointerdown"-Listener mehr nötig.
+    //  2. Nur ein natives PointerEvent bietet getCoalescedEvents(): Bei
+    //     hoher Eingabefrequenz (Apple Pencil, ProMotion-Displays mit bis zu
+    //     120Hz) fasst der Browser mehrere echte Abtastpunkte zu einem
+    //     einzigen ausgelieferten "pointermove" zusammen, wenn der
+    //     Haupt-Thread kurz beschäftigt ist - ohne getCoalescedEvents()
+    //     gehen diese Zwischenpunkte verloren und der Strich wirkt eckig/
+    //     ungenau statt dem tatsächlichen Stiftweg zu folgen.
+    let drawCanvasEl = null; // wird beim ersten Zeichnen-Versuch einmalig ermittelt (siehe unten)
+
+    stage.on('pointerdown', function (e) {
         if (e.target === stage) {
             tr.nodes([]);
         }
 
-        // Ein Finger zeichnet/radiert nie mehr (siehe unten), sondern
-        // verschiebt stattdessen das Blatt - aber NUR, wenn er auf leerer
-        // Fläche aufsetzt (e.target === stage). Landet der Finger dagegen
-        // auf einem Bild/Textfeld, wird hier NICHTS weiter gemacht, damit
-        // dessen eigenes draggable-Verhalten (siehe wireImageInteractions)
-        // wie gewohnt greift - Bilder/Textfelder bleiben mit dem Finger
-        // verschiebbar.
-        if (lastPointerType === 'touch') {
+        // Ein Finger zeichnet/radiert nie, sondern verschiebt stattdessen
+        // das Blatt - aber NUR, wenn er auf leerer Fläche aufsetzt
+        // (e.target === stage). Landet der Finger dagegen auf einem Bild/
+        // Textfeld, wird hier NICHTS weiter gemacht, damit dessen eigenes
+        // draggable-Verhalten (siehe wireImageInteractions) wie gewohnt
+        // greift - Bilder/Textfelder bleiben mit dem Finger verschiebbar.
+        if (e.evt.pointerType === 'touch') {
             if (e.target === stage) {
-                const touch = e.evt.touches && e.evt.touches[0];
-                if (touch) {
-                    isPanningTouch = true;
-                    lastPanClientY = touch.clientY;
-                }
+                isPanningTouch = true;
+                lastPanClientY = e.evt.clientY;
             }
             return;
         }
@@ -229,47 +226,57 @@ export function initNotizen() {
         if (e.target !== stage) return;
 
         isPaint = true;
-        let pos = stage.getPointerPosition();
+        const pos = stage.getPointerPosition();
         if (!pos) return;
 
+        currentStrokePoints = [pos.x, pos.y, pos.x, pos.y];
         lastLine = new Konva.Line({
             stroke: mode === 'erase' ? '#fafbff' : '#0b66ff',
             strokeWidth: mode === 'erase' ? 40 : 3,
             globalCompositeOperation: mode === 'erase' ? 'destination-out' : 'source-over',
             lineCap: 'round',
             lineJoin: 'round',
-            tension: FREEHAND_LINE_TENSION,
-            points: [pos.x, pos.y, pos.x, pos.y],
+            points: currentStrokePoints,
         });
         drawingLayer.add(lastLine);
+
+        if (!drawCanvasEl) drawCanvasEl = container.querySelector('canvas');
     });
 
-    stage.on('mouseup touchend', function () {
+    stage.on('pointerup pointercancel', function () {
         isPaint = false;
         isPanningTouch = false;
+        currentStrokePoints = null;
     });
 
-    stage.on('mousemove touchmove', function (e) {
+    stage.on('pointermove', function (e) {
         if (isPanningTouch) {
             e.evt.preventDefault();
-            const touch = e.evt.touches && e.evt.touches[0];
-            if (touch && container) {
-                // Finger nach oben ziehen = Blatt nach unten schieben (wie
-                // natives Scrollen), daher lastPanClientY - touch.clientY.
-                const deltaY = lastPanClientY - touch.clientY;
-                container.scrollTop += deltaY;
-                lastPanClientY = touch.clientY;
-                ensureEndlessHeight();
-            }
+            // Finger nach oben ziehen = Blatt nach unten schieben (wie
+            // natives Scrollen), daher lastPanClientY - clientY.
+            const deltaY = lastPanClientY - e.evt.clientY;
+            container.scrollTop += deltaY;
+            lastPanClientY = e.evt.clientY;
+            ensureEndlessHeight();
             return;
         }
-        if (!isPaint) return;
+        if (!isPaint || !currentStrokePoints) return;
         e.evt.preventDefault();
-        const pos = stage.getPointerPosition();
-        if (!pos) return;
-        let newPoints = lastLine.points().concat([pos.x, pos.y]);
-        lastLine.points(newPoints);
-        ensureEndlessHeight(pos.y);
+
+        if (!drawCanvasEl) drawCanvasEl = container.querySelector('canvas');
+        if (!drawCanvasEl) return;
+        const rect = drawCanvasEl.getBoundingClientRect();
+
+        // Alle tatsächlichen Zwischenpunkte seit dem letzten ausgelieferten
+        // Event mitnehmen (siehe Erklärung oben), nicht nur den letzten.
+        const rawEvents = (typeof e.evt.getCoalescedEvents === 'function') ? e.evt.getCoalescedEvents() : null;
+        const events = (rawEvents && rawEvents.length > 0) ? rawEvents : [e.evt];
+
+        events.forEach((evt) => {
+            currentStrokePoints.push(evt.clientX - rect.left, evt.clientY - rect.top);
+        });
+        lastLine.points(currentStrokePoints);
+        ensureEndlessHeight(currentStrokePoints[currentStrokePoints.length - 1]);
     });
 
     // Auch beim Verschieben eines Bildes/Textfelds per Drag soll das Blatt
@@ -358,59 +365,15 @@ export function initNotizen() {
         e.target.value = ''; 
     });
 
-    // Stift-Button: ein normaler Tap/Klick wechselt (wie bisher) in den
-    // Zeichnen-Modus. GEDRÜCKT HALTEN (Long-Press, ca. 450ms) schaltet
-    // stattdessen zwischen Radiergummi und Stift um (schnelles Radieren ohne
-    // Werkzeugwechsel).
-    //
-    // WICHTIG: Das war vorher als Doppelklick/Doppeltipp umgesetzt (zuerst
-    // über "dblclick", dann über eigene "click"/"pointerdown"-Zeitmessung) -
-    // funktionierte aber auf einem echten iPad trotzdem nicht zuverlässig.
-    // Wahrscheinliche Ursache: iOS Safaris eigene Doppeltipp-zum-Zoomen-
-    // Gestenerkennung kann den zweiten Tap abfangen/verzögern, bevor JS ihn
-    // überhaupt konsistent sieht - "touch-action: manipulation" unterdrückt
-    // das nicht in jeder iOS/Safari-Version zuverlässig. Long-Press hat
-    // dieses Problem nicht (kein zweiter Tap nötig, nur "gedrückt halten"),
-    // daher jetzt diese robustere Variante.
-    const btnNoteDraw = document.getElementById('btn-note-draw');
-    btnNoteDraw.style.touchAction = 'manipulation'; // verhindert Doppeltipp-Zoom auf dem Button (iPad Safari)
-    const LONG_PRESS_MS = 450;
-    let drawBtnPressTimer = null;
-    let drawBtnLongPressFired = false;
-    const cancelDrawBtnPressTimer = () => {
-        if (drawBtnPressTimer) { clearTimeout(drawBtnPressTimer); drawBtnPressTimer = null; }
-    };
-    btnNoteDraw.addEventListener('pointerdown', (e) => {
-        drawBtnLongPressFired = false;
-        cancelDrawBtnPressTimer();
-        drawBtnPressTimer = setTimeout(() => {
-            drawBtnPressTimer = null;
-            drawBtnLongPressFired = true;
-            setMode(mode === 'erase' ? 'draw' : 'erase');
-        }, LONG_PRESS_MS);
-    });
-    btnNoteDraw.addEventListener('pointerup', () => {
-        cancelDrawBtnPressTimer();
-        // Nur bei einem KURZEN Tap (kein Long-Press ausgelöst) sofort in den
-        // Zeichnen-Modus wechseln - sonst würde das den Long-Press-Wechsel
-        // (der ja schon "draw"<->"erase" umgeschaltet hat) direkt wieder
-        // rückgängig machen.
-        if (!drawBtnLongPressFired) setMode('draw');
-    });
-    // Wird der Finger/Pencil vom Button wegbewegt oder die Geste
-    // abgebrochen, bevor die Long-Press-Zeit erreicht ist, zählt es nicht
-    // als Tap ODER Long-Press - der Timer wird einfach nur verworfen.
-    btnNoteDraw.addEventListener('pointerleave', cancelDrawBtnPressTimer);
-    btnNoteDraw.addEventListener('pointercancel', cancelDrawBtnPressTimer);
-    // Das normale "click" auf demselben Button unterdrücken - wir werten den
-    // Tap bereits selbst über pointerdown/pointerup oben aus.
-    btnNoteDraw.addEventListener('click', (e) => e.preventDefault());
-    // Das native Kontextmenü (langes Drücken öffnet auf Touch-Geräten sonst
-    // z.B. ein Copy/Paste-Menü) beim Long-Press auf diesem Button unterdrücken.
-    btnNoteDraw.addEventListener('contextmenu', (e) => e.preventDefault());
+    // Stift-Button: ein einfacher Tap/Klick wechselt in den Zeichnen-Modus.
+    // (Es gab hier zwischenzeitlich einen Versuch, per Doppeltipp bzw.
+    // Long-Press zusätzlich direkt den Radiergummi umzuschalten - das ließ
+    // sich auf einem echten iPad aber nicht zuverlässig genug hinbekommen
+    // und wurde auf Wunsch wieder entfernt. Zum Radieren einfach den
+    // "Radiergummi"-Button daneben verwenden.)
+    document.getElementById('btn-note-draw').addEventListener('click', () => setMode('draw'));
     document.getElementById('btn-note-erase').addEventListener('click', () => setMode('erase'));
     document.getElementById('btn-note-text').addEventListener('click', () => setMode('text'));
-    document.getElementById('btn-note-pan').addEventListener('click', () => setMode('pan'));
     document.getElementById('btn-note-clear').addEventListener('click', async () => {
         if (await showConfirm("Alles löschen?", "Möchten Sie wirklich alle Notizen löschen?")) {
             drawingLayer.destroyChildren();
@@ -443,7 +406,7 @@ function setMode(newMode) {
     mode = newMode;
     const activeBg = '#0b66ff', inactiveBg = '#f8f9fa';
     if (tr) tr.nodes([]);
-    [['btn-note-draw', 'draw'], ['btn-note-erase', 'erase'], ['btn-note-text', 'text'], ['btn-note-pan', 'pan']].forEach(([id, m]) => {
+    [['btn-note-draw', 'draw'], ['btn-note-erase', 'erase'], ['btn-note-text', 'text']].forEach(([id, m]) => {
         const btn = document.getElementById(id);
         if (!btn) return;
         btn.style.backgroundColor = mode === m ? activeBg : inactiveBg;
@@ -452,7 +415,6 @@ function setMode(newMode) {
     if (!container) return;
     if (mode === 'text') container.style.cursor = 'text';
     else if (mode === 'erase') container.style.cursor = 'cell';
-    else if (mode === 'pan') container.style.cursor = 'grab';
     else container.style.cursor = 'crosshair';
     // touch-action bleibt unabhängig vom Modus dauerhaft 'none' (siehe
     // initNotizen) - das Verschieben mit dem Finger übernehmen wir in JEDEM
@@ -684,7 +646,6 @@ export function restoreNotizen(data) {
             globalCompositeOperation: l.globalCompositeOperation || 'source-over',
             lineCap: 'round',
             lineJoin: 'round',
-            tension: FREEHAND_LINE_TENSION,
             points: l.points,
         });
         drawingLayer.add(line);
