@@ -358,41 +358,56 @@ export function initNotizen() {
         e.target.value = ''; 
     });
 
-    // Stift-Button: ein einfacher Klick/Tap wechselt (wie bisher) in den
-    // Zeichnen-Modus. Ein Doppelklick/Doppeltipp schaltet stattdessen
-    // zwischen Radiergummi und Stift um (schnelles Radieren ohne
-    // Werkzeugwechsel). WICHTIG: das wird bewusst über "pointerdown" erkannt,
-    // nicht über "click" oder "dblclick" - beide werden auf dem iPad bei
-    // einem Finger-Doppeltipp teils verzögert oder inkonsistent synthetisiert
-    // (das war der Grund, warum die Umschaltung auf dem iPad nicht
-    // funktionierte). "pointerdown" feuert dagegen sofort und zuverlässig bei
-    // jeder Berührung, für Finger, Pencil und Maus gleichermaßen.
+    // Stift-Button: ein normaler Tap/Klick wechselt (wie bisher) in den
+    // Zeichnen-Modus. GEDRÜCKT HALTEN (Long-Press, ca. 450ms) schaltet
+    // stattdessen zwischen Radiergummi und Stift um (schnelles Radieren ohne
+    // Werkzeugwechsel).
+    //
+    // WICHTIG: Das war vorher als Doppelklick/Doppeltipp umgesetzt (zuerst
+    // über "dblclick", dann über eigene "click"/"pointerdown"-Zeitmessung) -
+    // funktionierte aber auf einem echten iPad trotzdem nicht zuverlässig.
+    // Wahrscheinliche Ursache: iOS Safaris eigene Doppeltipp-zum-Zoomen-
+    // Gestenerkennung kann den zweiten Tap abfangen/verzögern, bevor JS ihn
+    // überhaupt konsistent sieht - "touch-action: manipulation" unterdrückt
+    // das nicht in jeder iOS/Safari-Version zuverlässig. Long-Press hat
+    // dieses Problem nicht (kein zweiter Tap nötig, nur "gedrückt halten"),
+    // daher jetzt diese robustere Variante.
     const btnNoteDraw = document.getElementById('btn-note-draw');
     btnNoteDraw.style.touchAction = 'manipulation'; // verhindert Doppeltipp-Zoom auf dem Button (iPad Safari)
-    const DRAW_BTN_DOUBLE_TAP_MS = 350;
-    let drawBtnSingleTimer = null;
-    let drawBtnLastDownAt = 0;
+    const LONG_PRESS_MS = 450;
+    let drawBtnPressTimer = null;
+    let drawBtnLongPressFired = false;
+    const cancelDrawBtnPressTimer = () => {
+        if (drawBtnPressTimer) { clearTimeout(drawBtnPressTimer); drawBtnPressTimer = null; }
+    };
     btnNoteDraw.addEventListener('pointerdown', (e) => {
-        const now = Date.now();
-        const isDoubleTap = (now - drawBtnLastDownAt) < DRAW_BTN_DOUBLE_TAP_MS;
-        drawBtnLastDownAt = isDoubleTap ? 0 : now; // reset, damit ein 3. schneller Tap nicht sofort wieder als "Doppeltipp" zählt
-        if (drawBtnSingleTimer) { clearTimeout(drawBtnSingleTimer); drawBtnSingleTimer = null; }
-        if (isDoubleTap) {
-            e.preventDefault();
+        drawBtnLongPressFired = false;
+        cancelDrawBtnPressTimer();
+        drawBtnPressTimer = setTimeout(() => {
+            drawBtnPressTimer = null;
+            drawBtnLongPressFired = true;
             setMode(mode === 'erase' ? 'draw' : 'erase');
-            return;
-        }
-        // Kurz abwarten, ob noch ein zweiter Tap folgt (s.o.) - erst dann
-        // wirklich in den Zeichnen-Modus wechseln.
-        drawBtnSingleTimer = setTimeout(() => {
-            drawBtnSingleTimer = null;
-            setMode('draw');
-        }, DRAW_BTN_DOUBLE_TAP_MS);
+        }, LONG_PRESS_MS);
     });
-    // Das normale "click" auf demselben Button unterdrücken - sonst würde es
-    // (leicht verzögert, aber zuverlässig zusätzlich zu "pointerdown")
-    // nochmal setMode('draw') auslösen und die obige Logik durcheinanderbringen.
+    btnNoteDraw.addEventListener('pointerup', () => {
+        cancelDrawBtnPressTimer();
+        // Nur bei einem KURZEN Tap (kein Long-Press ausgelöst) sofort in den
+        // Zeichnen-Modus wechseln - sonst würde das den Long-Press-Wechsel
+        // (der ja schon "draw"<->"erase" umgeschaltet hat) direkt wieder
+        // rückgängig machen.
+        if (!drawBtnLongPressFired) setMode('draw');
+    });
+    // Wird der Finger/Pencil vom Button wegbewegt oder die Geste
+    // abgebrochen, bevor die Long-Press-Zeit erreicht ist, zählt es nicht
+    // als Tap ODER Long-Press - der Timer wird einfach nur verworfen.
+    btnNoteDraw.addEventListener('pointerleave', cancelDrawBtnPressTimer);
+    btnNoteDraw.addEventListener('pointercancel', cancelDrawBtnPressTimer);
+    // Das normale "click" auf demselben Button unterdrücken - wir werten den
+    // Tap bereits selbst über pointerdown/pointerup oben aus.
     btnNoteDraw.addEventListener('click', (e) => e.preventDefault());
+    // Das native Kontextmenü (langes Drücken öffnet auf Touch-Geräten sonst
+    // z.B. ein Copy/Paste-Menü) beim Long-Press auf diesem Button unterdrücken.
+    btnNoteDraw.addEventListener('contextmenu', (e) => e.preventDefault());
     document.getElementById('btn-note-erase').addEventListener('click', () => setMode('erase'));
     document.getElementById('btn-note-text').addEventListener('click', () => setMode('text'));
     document.getElementById('btn-note-pan').addEventListener('click', () => setMode('pan'));
